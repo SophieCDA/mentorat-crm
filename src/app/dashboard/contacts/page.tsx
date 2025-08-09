@@ -1,10 +1,9 @@
-// app/dashboard/contacts/page.tsx
+// app/dashboard/contacts/page.tsx - Version mise à jour
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Contact, ContactFilters } from '@/types/contact.types';
+import { Contact, ContactFilters, ContactStats } from '@/types/contact.types';
 import ContactsTable from '@/components/contacts/ContactsTable';
 import ContactsFilters from '@/components/contacts/ContactsFilters';
 import ContactsStats from '@/components/contacts/ContactsStats';
@@ -25,16 +24,30 @@ export default function ContactsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalContacts, setTotalContacts] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
+  
+  // Nouveau state pour gérer le refresh des stats
+  const [statsRefreshTrigger, setStatsRefreshTrigger] = useState(0);
+  const [currentStats, setCurrentStats] = useState<ContactStats | null>(null);
+  
   const itemsPerPage = 20;
 
   useEffect(() => {
     loadContacts();
   }, [filters, currentPage, searchTerm]);
 
-  // Type pour la réponse de l'API
+  // Fonction pour déclencher un refresh des stats
+  const triggerStatsRefresh = useCallback(() => {
+    setStatsRefreshTrigger(prev => prev + 1);
+  }, []);
+
+  // Handler pour recevoir les stats mises à jour
+  const handleStatsLoaded = useCallback((stats: ContactStats) => {
+    setCurrentStats(stats);
+  }, []);
+
   interface ContactsResponse {
     data?: Contact[];
-    contacts?: Contact[] | any; // Temporairement any pour gérer la réponse malformée
+    contacts?: Contact[] | any;
     total?: number;
     totalPages?: number;
     page?: number;
@@ -45,7 +58,6 @@ export default function ContactsPage() {
     try {
       setLoading(true);
       
-      // Construction des paramètres de requête
       const params = {
         page: currentPage,
         limit: itemsPerPage,
@@ -61,48 +73,32 @@ export default function ContactsPage() {
         date_fin: filters.date_fin || undefined,
       };
 
-      // Appel API pour récupérer les contacts avec typage
       const response = await apiClient.get<ContactsResponse>('/api/contacts', { params });
       
-      console.log('Réponse API brute:', response); // Debug
-      
-      // Gestion de la réponse avec validation
       let contactsData: Contact[] = [];
       
-      // Cas 1: response.contacts est un tableau de contacts
       if (Array.isArray(response.contacts) && response.contacts.length > 0 && typeof response.contacts[0] === 'object' && 'id_utilisateur' in response.contacts[0]) {
         contactsData = response.contacts;
-      }
-      // Cas 2: response.data est un tableau de contacts
-      else if (Array.isArray(response.data) && response.data.length > 0 && typeof response.data[0] === 'object') {
+      } else if (Array.isArray(response.data) && response.data.length > 0 && typeof response.data[0] === 'object') {
         contactsData = response.data;
-      }
-      // Cas 3: response est directement un tableau de contacts
-      else if (Array.isArray(response) && response.length > 0 && typeof response[0] === 'object' && 'id_utilisateur' in response[0]) {
+      } else if (Array.isArray(response) && response.length > 0 && typeof response[0] === 'object' && 'id_utilisateur' in response[0]) {
         contactsData = response as unknown as Contact[];
-      }
-      // Cas 4: réponse malformée comme {"contacts":[[],0]}
-      else if (response.contacts && Array.isArray(response.contacts) && response.contacts[0] && Array.isArray(response.contacts[0])) {
-        // Si c'est une structure de type [contacts_array, total_count]
+      } else if (response.contacts && Array.isArray(response.contacts) && response.contacts[0] && Array.isArray(response.contacts[0])) {
         contactsData = response.contacts[0] as Contact[];
         const totalCount = typeof response.contacts[1] === 'number' ? response.contacts[1] : 0;
         setTotalContacts(totalCount);
         setTotalPages(Math.ceil(totalCount / itemsPerPage) || 1);
-      }
-      // Cas par défaut: pas de contacts
-      else {
+      } else {
         contactsData = [];
         console.warn('Format de réponse non reconnu:', response);
       }
       
-      // Filtrer les contacts invalides
       const validContacts = contactsData.filter(c => 
         c && typeof c === 'object' && 'id_utilisateur' in c
       );
       
       setContacts(validContacts);
       
-      // Gestion de la pagination si pas déjà fait
       if (!response.contacts || !Array.isArray(response.contacts) || !Array.isArray(response.contacts[0])) {
         setTotalPages(response.totalPages || Math.ceil((response.total || validContacts.length) / itemsPerPage) || 1);
         setTotalContacts(response.total || validContacts.length || 0);
@@ -110,9 +106,8 @@ export default function ContactsPage() {
       
     } catch (error) {
       console.error('Erreur lors du chargement des contacts:', error);
-      // Afficher une notification d'erreur
       alert('Erreur lors du chargement des contacts. Veuillez réessayer.');
-      setContacts([]); // S'assurer que contacts est vide en cas d'erreur
+      setContacts([]);
     } finally {
       setLoading(false);
     }
@@ -120,27 +115,26 @@ export default function ContactsPage() {
 
   const handleSearch = (value: string) => {
     setSearchTerm(value);
-    setCurrentPage(1); // Reset à la première page lors d'une recherche
+    setCurrentPage(1);
   };
 
   const handleDelete = async (ids: number[]) => {
     if (confirm(`Êtes-vous sûr de vouloir supprimer ${ids.length} contact(s) ?`)) {
       try {
-        // Utilisation de deleteMany si disponible dans l'API
         if (apiClient.deleteMany) {
-          await apiClient.deleteMany('/contacts', ids);
+          await apiClient.deleteMany('/api/contacts/bulk', { contact_ids: ids });
         } else {
-          // Sinon, suppression individuelle
           await Promise.all(
             ids.map(id => apiClient.delete(`/contacts/${id}`))
           );
         }
         
-        // Recharger les contacts après suppression
         await loadContacts();
         setSelectedContacts([]);
         
-        // Notification de succès
+        // Déclencher le refresh des stats après suppression
+        triggerStatsRefresh();
+        
         alert(`${ids.length} contact(s) supprimé(s) avec succès`);
       } catch (error) {
         console.error('Erreur lors de la suppression:', error);
@@ -151,14 +145,12 @@ export default function ContactsPage() {
 
   const handleExport = async () => {
     try {
-      // Construction des paramètres pour l'export
       const params = {
-        format: 'csv', // ou 'xlsx' selon le format souhaité
+        format: 'csv',
         ids: selectedContacts.length > 0 ? selectedContacts : undefined,
         ...filters
       };
       
-      // Utilisation de la méthode download du apiClient
       await apiClient.download(
         '/contacts/export',
         `contacts_${new Date().toISOString().split('T')[0]}.csv`,
@@ -184,50 +176,15 @@ export default function ContactsPage() {
       
       const response = await apiClient.post<ImportResponse>('/contacts/import', formData);
       
-      // Recharger les contacts après import
       await loadContacts();
+      
+      // Déclencher le refresh des stats après import
+      triggerStatsRefresh();
       
       alert(`Import réussi: ${response.imported} contact(s) importé(s)`);
     } catch (error) {
       console.error('Erreur lors de l\'import:', error);
       alert('Erreur lors de l\'import. Vérifiez le format du fichier.');
-    }
-  };
-
-  interface BulkResponse {
-    success: boolean;
-    message?: string;
-    affected?: number;
-  }
-
-  const handleBulkAddTags = async (tagIds: number[]) => {
-    try {
-      const response = await apiClient.post<BulkResponse>('/contacts/bulk/tags', {
-        contactIds: selectedContacts,
-        tagIds: tagIds
-      });
-      
-      await loadContacts();
-      setSelectedContacts([]);
-      alert(response.message || 'Tags ajoutés avec succès');
-    } catch (error) {
-      console.error('Erreur lors de l\'ajout des tags:', error);
-      alert('Erreur lors de l\'ajout des tags');
-    }
-  };
-
-  const handleBulkAddToCampaign = async (campaignId: number) => {
-    try {
-      const response = await apiClient.post<BulkResponse>(`/campagnes/${campaignId}/contacts`, {
-        contactIds: selectedContacts
-      });
-      
-      await loadContacts();
-      setSelectedContacts([]);
-      alert(response.message || 'Contacts ajoutés à la campagne avec succès');
-    } catch (error) {
-      console.error('Erreur lors de l\'ajout à la campagne:', error);
-      alert('Erreur lors de l\'ajout à la campagne');
     }
   };
 
@@ -237,11 +194,9 @@ export default function ContactsPage() {
         handleDelete(selectedContacts);
         break;
       case 'add-tag':
-        // TODO: Ouvrir modal pour sélectionner les tags
         console.log('Ouvrir modal tags');
         break;
       case 'add-campaign':
-        // TODO: Ouvrir modal pour sélectionner la campagne
         console.log('Ouvrir modal campagne');
         break;
       case 'export':
@@ -257,6 +212,18 @@ export default function ContactsPage() {
     }
   };
 
+  // Handler pour la création de contact avec refresh des stats
+  const handleContactCreated = (contact: Contact) => {
+    setShowAddModal(false);
+    loadContacts();
+    
+    // Déclencher le refresh des stats après création
+    triggerStatsRefresh();
+    
+    // Optionnellement afficher une notification
+    alert('Contact créé avec succès');
+  };
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -264,9 +231,11 @@ export default function ContactsPage() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Contacts</h1>
-            <p className="text-sm text-gray-500">
-              Gérez vos contacts, leurs tags, campagnes et formations
-            </p>
+            <div className="flex items-center space-x-4 mt-1">
+              <p className="text-sm text-gray-500">
+                Gérez vos contacts, leurs tags, campagnes et formations
+              </p>
+            </div>
           </div>
           
           <div className="flex items-center space-x-3">
@@ -308,8 +277,11 @@ export default function ContactsPage() {
           </div>
         </div>
 
-        {/* Stats cards */}
-        <ContactsStats />
+        {/* Stats cards avec refresh automatique */}
+        <ContactsStats 
+          refreshTrigger={statsRefreshTrigger}
+          onStatsLoaded={handleStatsLoaded}
+        />
       </div>
 
       {/* Search and filters */}
@@ -390,7 +362,6 @@ export default function ContactsPage() {
               Précédent
             </button>
             
-            {/* Affichage intelligent de la pagination */}
             {totalPages <= 7 ? (
               [...Array(totalPages)].map((_, i) => (
                 <button
@@ -464,14 +435,11 @@ export default function ContactsPage() {
         </div>
       )}
 
-      {/* Add contact modal */}
+      {/* Add contact modal avec callback de refresh */}
       {showAddModal && (
         <ContactModal
           onClose={() => setShowAddModal(false)}
-          onSave={() => {
-            setShowAddModal(false);
-            loadContacts();
-          }}
+          onSave={handleContactCreated}
         />
       )}
     </div>

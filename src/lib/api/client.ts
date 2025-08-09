@@ -185,10 +185,10 @@ class ApiClient {
     return this.get<T>(endpoint, { ...config, params });
   }
 
-  async deleteMany<T>(endpoint: string, ids: number[], config?: RequestConfig): Promise<T> {
+  async deleteMany<T>(endpoint: string, ids: object, config?: RequestConfig): Promise<T> {
     return this.delete<T>(endpoint, {
       ...config,
-      body: ids.length > 0 ? JSON.stringify({ ids }) : undefined,
+      body: ids
     });
   }
 
