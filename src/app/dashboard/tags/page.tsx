@@ -1,23 +1,14 @@
-// app/dashboard/tags/page.tsx
+// app/dashboard/tags/page.tsx - Version avec mise à jour automatique des stats
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Tag, TagFilters } from '@/types/tag.types';
+import { useState, useEffect, useRef } from 'react';
+import { Tag, TagFilters, CreateTagData, UpdateTagData, TagStats } from '@/types/tag.types';
 import TagsTable from '@/components/tags/TagsTable';
 import TagsFilters from '@/components/tags/TagsFilters';
-import TagsStats from '@/components/tags/TagsStats';
+import TagsStats, { TagsStatsRef } from '@/components/tags/TagsStats';
 import TagModal from '@/components/tags/TagModal';
 import ColorPicker, { colorUtils } from '@/components/tags/ColorPicker';
 import { apiClient } from '@/lib/api/client';
-
-// Interface pour la réponse de l'API
-interface TagsResponse {
-  tags: Tag[];
-  total: number;
-  page: number;
-  limit: number;
-  total_pages: number;
-}
 
 export default function TagsPage() {
   const [tags, setTags] = useState<Tag[]>([]);
@@ -29,85 +20,85 @@ export default function TagsPage() {
   });
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [totalTags, setTotalTags] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [showQuickAddTag, setShowQuickAddTag] = useState(false);
   const [quickTagData, setQuickTagData] = useState({
     nom: '',
     couleur: colorUtils.randomColor()
   });
-  const itemsPerPage = 20;
+  const [currentStats, setCurrentStats] = useState<TagStats | null>(null);
+
+  // Référence pour contrôler le composant TagsStats
+  const statsRef = useRef<TagsStatsRef>(null);
 
   useEffect(() => {
     loadTags();
-  }, [filters, currentPage, searchTerm]);
+  }, [filters, searchTerm]);
 
   const loadTags = async () => {
     try {
       setLoading(true);
       
-      const params = {
-        page: currentPage,
-        limit: itemsPerPage,
-        sort_by: filters.sort_by,
-        sort_order: filters.sort_order,
+      const params: TagFilters = {
+        ...filters,
         search: searchTerm || undefined,
-        couleur: filters.couleur || undefined,
       };
 
-      const response = await apiClient.get<TagsResponse | Tag[]>('/api/tags', { params });
+      const response = await apiClient.get<Tag[]>('/api/tags', { params });
       console.log('Tags response:', response);
       
-      // Gestion de la réponse avec la nouvelle structure
-      if (response && typeof response === 'object') {
-        if ('tags' in response && Array.isArray(response.tags)) {
-          // Structure: { tags: [...], total: ..., etc. }
-          setTags(response.tags);
-          setTotalTags(response.total || response.tags.length);
-          setTotalPages(response.total_pages || Math.ceil((response.total || response.tags.length) / itemsPerPage));
-        } else if (Array.isArray(response)) {
-          // Structure: [tag1, tag2, ...]
-          setTags(response);
-          setTotalTags(response.length);
-          setTotalPages(Math.ceil(response.length / itemsPerPage));
-        } else {
-          console.warn('Format de réponse non reconnu:', response);
-          setTags([]);
-          setTotalTags(0);
-          setTotalPages(1);
-        }
+      if (Array.isArray(response)) {
+        setTags(response);
       } else {
-        console.warn('Réponse API inattendue:', response);
+        console.warn('Format de réponse non reconnu:', response);
         setTags([]);
-        setTotalTags(0);
-        setTotalPages(1);
       }
       
     } catch (error) {
       console.error('Erreur lors du chargement des tags:', error);
       alert('Erreur lors du chargement des tags. Veuillez réessayer.');
       setTags([]);
-      setTotalTags(0);
-      setTotalPages(1);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSearch = (value: string) => {
-    setSearchTerm(value);
-    setCurrentPage(1);
+  // Fonction helper pour rafraîchir tags ET stats
+  const refreshTagsAndStats = async () => {
+    console.log('🔄 Rafraîchissement des tags et statistiques...');
+    
+    // Rafraîchir les tags
+    await loadTags();
+    
+    // Rafraîchir les stats via la ref
+    if (statsRef.current) {
+      await statsRef.current.forceRefresh();
+    }
+    
+    console.log('✅ Tags et statistiques mis à jour');
   };
 
-  const handleCreateTag = async (tagData: { nom: string; couleur: string; description?: string }) => {
+  const handleSearch = (value: string) => {
+    setSearchTerm(value);
+  };
+
+  const handleCreateTag = async (tagData: CreateTagData) => {
     try {
-      const response = await apiClient.post('/api/tags', tagData);
+      const response = await apiClient.post<Tag>('/api/tags', tagData);
       console.log('Tag created:', response);
-      await loadTags();
+      
+      // Rafraîchir les tags et stats
+      await refreshTagsAndStats();
+      
       setShowAddModal(false);
-      alert('Tag créé avec succès');
+      
+      // Notification de succès avec détails
+      const message = `Tag "${tagData.nom}" créé avec succès!`;
+      console.log(message);
+      
+      // Toast notification au lieu d'alert
+      showSuccessToast(message);
+      
     } catch (error: any) {
       console.error('Erreur lors de la création:', error);
       if (error.message?.includes('existe déjà')) {
@@ -125,18 +116,25 @@ export default function TagsPage() {
     }
 
     try {
-      const response = await apiClient.post('/api/tags', {
+      const tagData: CreateTagData = {
         nom: quickTagData.nom.trim(),
         couleur: quickTagData.couleur
-      });
+      };
+      
+      const response = await apiClient.post<Tag>('/api/tags', tagData);
       console.log('Quick tag created:', response);
-      await loadTags();
+      
+      // Rafraîchir les tags et stats
+      await refreshTagsAndStats();
+      
       setShowQuickAddTag(false);
       setQuickTagData({
         nom: '',
         couleur: colorUtils.randomColor()
       });
-      alert('Tag créé avec succès');
+      
+      showSuccessToast(`Tag "${tagData.nom}" créé rapidement!`);
+      
     } catch (error: any) {
       console.error('Erreur lors de la création:', error);
       if (error.message?.includes('existe déjà')) {
@@ -147,13 +145,17 @@ export default function TagsPage() {
     }
   };
 
-  const handleUpdateTag = async (tagId: number, tagData: { nom?: string; couleur?: string; description?: string }) => {
+  const handleUpdateTag = async (tagId: number, tagData: UpdateTagData) => {
     try {
       const response = await apiClient.put(`/api/tags/${tagId}`, tagData);
       console.log('Tag updated:', response);
-      await loadTags();
+      
+      // Rafraîchir les tags et stats
+      await refreshTagsAndStats();
+      
       setEditingTag(null);
-      alert('Tag modifié avec succès');
+      showSuccessToast('Tag modifié avec succès');
+      
     } catch (error) {
       console.error('Erreur lors de la modification:', error);
       alert('Erreur lors de la modification du tag');
@@ -161,12 +163,25 @@ export default function TagsPage() {
   };
 
   const handleDeleteTag = async (tagId: number) => {
-    if (confirm('Êtes-vous sûr de vouloir supprimer ce tag ? Il sera retiré de tous les contacts.')) {
+    const tag = tags.find(t => t.id === tagId);
+    const contactCount = tag?.nombre_contacts || 0;
+    
+    let confirmMessage = 'Êtes-vous sûr de vouloir supprimer ce tag ?';
+    if (contactCount > 0) {
+      confirmMessage += ` Il sera retiré de ${contactCount} contact(s).`;
+    }
+    
+    if (confirm(confirmMessage)) {
       try {
         const response = await apiClient.delete(`/api/tags/${tagId}`);
         console.log('Tag deleted:', response);
-        await loadTags();
-        alert('Tag supprimé avec succès');
+        
+        // Rafraîchir les tags et stats
+        await refreshTagsAndStats();
+        
+        setSelectedTags(prev => prev.filter(id => id !== tagId));
+        showSuccessToast(`Tag "${tag?.nom}" supprimé avec succès`);
+        
       } catch (error) {
         console.error('Erreur lors de la suppression:', error);
         alert('Erreur lors de la suppression du tag');
@@ -177,15 +192,29 @@ export default function TagsPage() {
   const handleBulkDelete = async () => {
     if (selectedTags.length === 0) return;
     
-    if (confirm(`Êtes-vous sûr de vouloir supprimer ${selectedTags.length} tag(s) ?`)) {
+    const totalContacts = selectedTags.reduce((total, tagId) => {
+      const tag = tags.find(t => t.id === tagId);
+      return total + (tag?.nombre_contacts || 0);
+    }, 0);
+    
+    let confirmMessage = `Êtes-vous sûr de vouloir supprimer ${selectedTags.length} tag(s) ?`;
+    if (totalContacts > 0) {
+      confirmMessage += ` Cela affectera ${totalContacts} contact(s).`;
+    }
+    
+    if (confirm(confirmMessage)) {
       try {
-        // Supprimer chaque tag individuellement puisque nous n'avons pas d'endpoint bulk
+        // Supprimer chaque tag individuellement
         await Promise.all(
           selectedTags.map(tagId => apiClient.delete(`/api/tags/${tagId}`))
         );
-        await loadTags();
+        
+        // Rafraîchir les tags et stats
+        await refreshTagsAndStats();
+        
         setSelectedTags([]);
-        alert(`${selectedTags.length} tag(s) supprimé(s) avec succès`);
+        showSuccessToast(`${selectedTags.length} tag(s) supprimé(s) avec succès`);
+        
       } catch (error) {
         console.error('Erreur lors de la suppression en masse:', error);
         alert('Erreur lors de la suppression des tags');
@@ -201,14 +230,19 @@ export default function TagsPage() {
     if (!newName) return;
 
     try {
-      // Créer un nouveau tag avec les mêmes propriétés
-      await apiClient.post('/api/tags', {
+      const tagData: CreateTagData = {
         nom: newName,
         couleur: originalTag.couleur,
         description: originalTag.description ? `${originalTag.description} (copie)` : undefined
-      });
-      await loadTags();
-      alert('Tag dupliqué avec succès');
+      };
+      
+      await apiClient.post<Tag>('/api/tags', tagData);
+      
+      // Rafraîchir les tags et stats
+      await refreshTagsAndStats();
+      
+      showSuccessToast(`Tag "${newName}" dupliqué avec succès`);
+      
     } catch (error) {
       console.error('Erreur lors de la duplication:', error);
       alert('Erreur lors de la duplication du tag');
@@ -233,17 +267,20 @@ export default function TagsPage() {
 
     if (choice) {
       try {
-        // TODO: Implémenter l'endpoint de fusion côté backend
-        alert('Fonctionnalité de fusion en cours de développement');
+        // Utiliser l'endpoint de fusion que nous avons créé
+        const response = await apiClient.post('/api/tags/merge', {
+          source_tag_id: selectedTags[0],
+          target_tag_id: selectedTags[1]
+        });
         
-        // Code pour plus tard:
-        // await apiClient.post('/api/tags/merge', {
-        //   source_tag_id: selectedTags[0],
-        //   target_tag_id: selectedTags[1]
-        // });
-        // await loadTags();
-        // setSelectedTags([]);
-        // alert('Tags fusionnés avec succès');
+        console.log('Tags merged:', response);
+        
+        // Rafraîchir les tags et stats
+        await refreshTagsAndStats();
+        
+        setSelectedTags([]);
+        showSuccessToast(`Tags fusionnés: "${tag1.nom}" → "${tag2.nom}"`);
+        
       } catch (error) {
         console.error('Erreur lors de la fusion:', error);
         alert('Erreur lors de la fusion des tags');
@@ -262,14 +299,58 @@ export default function TagsPage() {
             apiClient.put(`/api/tags/${tagId}`, { couleur: newColor })
           )
         );
-        await loadTags();
+        
+        // Rafraîchir les tags et stats
+        await refreshTagsAndStats();
+        
         setSelectedTags([]);
-        alert(`Couleur mise à jour pour ${selectedTags.length} tag(s)`);
+        showSuccessToast(`Couleur mise à jour pour ${selectedTags.length} tag(s)`);
+        
       } catch (error) {
         console.error('Erreur lors du changement de couleur:', error);
         alert('Erreur lors du changement de couleur');
       }
     }
+  };
+
+  const handleRefreshTags = async () => {
+    try {
+      // Forcer le rechargement avec force_refresh
+      setFilters(prev => ({ ...prev, force_refresh: true }));
+      await refreshTagsAndStats();
+      // Remettre force_refresh à false
+      setFilters(prev => ({ ...prev, force_refresh: false }));
+      showSuccessToast('Tags et statistiques rechargés');
+    } catch (error) {
+      console.error('Erreur lors du rechargement:', error);
+      alert('Erreur lors du rechargement des tags');
+    }
+  };
+
+  // Fonction pour afficher les notifications de succès
+  const showSuccessToast = (message: string) => {
+    // Pour l'instant, on utilise console.log
+    // Plus tard, vous pourrez remplacer par un système de toast/notification
+    console.log(`✅ ${message}`);
+    
+    // Optionnel: afficher temporairement un message à l'écran
+    const toast = document.createElement('div');
+    toast.className = 'fixed top-4 right-4 bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => {
+        document.body.removeChild(toast);
+      }, 300);
+    }, 3000);
+  };
+
+  // Gestionnaire pour quand les stats sont chargées
+  const handleStatsLoaded = (stats: TagStats) => {
+    setCurrentStats(stats);
+    console.log('📊 Statistiques chargées:', stats);
   };
 
   return (
@@ -285,6 +366,17 @@ export default function TagsPage() {
           </div>
           
           <div className="flex items-center space-x-3">
+            {/* Bouton refresh */}
+            <button
+              onClick={handleRefreshTags}
+              className="p-2 rounded-lg bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+              title="Actualiser"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+
             {/* Bouton fusion (si 2 tags sélectionnés) */}
             {selectedTags.length === 2 && (
               <button
@@ -334,8 +426,8 @@ export default function TagsPage() {
           </div>
         </div>
 
-        {/* Stats cards */}
-        <TagsStats />
+        {/* Stats cards avec ref pour contrôle */}
+        <TagsStats ref={statsRef} onStatsLoaded={handleStatsLoaded} />
       </div>
 
       {/* Quick Add Tag */}
@@ -354,6 +446,7 @@ export default function TagsPage() {
                     handleQuickCreateTag();
                   }
                 }}
+                autoFocus
               />
             </div>
             
@@ -365,7 +458,8 @@ export default function TagsPage() {
             
             <button
               onClick={handleQuickCreateTag}
-              className="px-4 py-2 bg-gradient-to-r from-[#F22E77] to-[#7978E2] text-white rounded-lg hover:shadow-lg transition-all"
+              disabled={!quickTagData.nom.trim()}
+              className="px-4 py-2 bg-gradient-to-r from-[#F22E77] to-[#7978E2] text-white rounded-lg hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Créer
             </button>
@@ -438,12 +532,10 @@ export default function TagsPage() {
         )}
       </div>
 
-      {/* Debug info - à retirer en production */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="mb-4 p-3 bg-gray-100 rounded text-sm">
-          <strong>Debug:</strong> {tags.length} tags chargés, Total: {totalTags}, Pages: {totalPages}
-        </div>
-      )}
+      {/* Info sur les tags chargés */}
+      <div className="mb-4 text-sm text-gray-500">
+        {loading ? 'Chargement...' : `${tags.length} tag(s) affiché(s)`}
+      </div>
 
       {/* Tags table */}
       <TagsTable
@@ -455,54 +547,6 @@ export default function TagsPage() {
         onDelete={handleDeleteTag}
         onDuplicate={handleDuplicateTag}
       />
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="mt-6 flex items-center justify-between">
-          <div className="text-sm text-gray-500">
-            Affichage de {((currentPage - 1) * itemsPerPage) + 1} à {Math.min(currentPage * itemsPerPage, totalTags)} sur {totalTags} tags
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-              disabled={currentPage === 1}
-              className="px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Précédent
-            </button>
-            
-            {/* Pages */}
-            {[...Array(Math.min(5, totalPages))].map((_, i) => {
-              const pageNum = Math.max(1, currentPage - 2) + i;
-              if (pageNum <= totalPages) {
-                return (
-                  <button
-                    key={pageNum}
-                    onClick={() => setCurrentPage(pageNum)}
-                    className={`px-3 py-2 rounded-lg ${
-                      currentPage === pageNum
-                        ? 'bg-gradient-to-r from-[#F22E77] to-[#7978E2] text-white'
-                        : 'border border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    {pageNum}
-                  </button>
-                );
-              }
-              return null;
-            })}
-            
-            <button
-              onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-              disabled={currentPage === totalPages}
-              className="px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Suivant
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Modals */}
       {showAddModal && (
