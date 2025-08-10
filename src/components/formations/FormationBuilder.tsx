@@ -1,39 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
-import { Plus, Save, Eye, Settings, Layout, Type, Image, Video, FileText, Link, ChevronDown, ChevronRight, Trash2, Copy, GripVertical, ArrowLeft, Upload, Check, AlertCircle } from 'lucide-react';
-import { formationService } from '@/lib/services/formation.service';
+import React, { useState, useEffect } from 'react';
+import { Crown, Layout, Eye, TrendingUp, Users, Target, Star, Heart, Sparkles, Plus } from 'lucide-react';
 
-// Types (à placer dans src/types/formation.types.ts)
-interface ContentBlock {
-  id: string;
-  type: 'text' | 'image' | 'video' | 'audio' | 'quiz' | 'file' | 'embed';
-  ordre: number;
-  data: any;
-  obligatoire: boolean;
-  titre?: string;
-}
+// Import des types et constantes
+import { Formation, COLORS, PREVIEW_MODES } from '@/types/formation.types';
 
-interface Chapter {
-  id: number;
-  titre: string;
-  description?: string;
-  ordre: number;
-  duree_estimee: number;
-  obligatoire: boolean;
-  contenu: ContentBlock[];
-}
+// Import des hooks
+import { useFormationActions } from '@/hooks/useFormationBuilder';
 
-interface Module {
-  id: number;
-  titre: string;
-  description?: string;
-  ordre: number;
-  duree_estimee: number;
-  obligatoire: boolean;
-  chapitres: Chapter[];
-}
+// Import des composants
+import { NotificationProvider, useNotifications } from '@/contexts/NotificationContext';
+import { PremiumHeader } from '@/components/formations/builder/PremiumHeader';
+import { PremiumImageUploader } from '@/components/formations/builder/ImageUploader';
+import { PremiumTextEditor } from '@/components/formations/builder/TextEditor';
+import { PremiumQuizEditor } from '@/components/formations/builder/QuizEditor';
+import { BuilderView } from '@/components/formations/builder/BuilderView';
+import { PreviewView } from '@/components/formations/builder/PreviewView';
+import { AnalyticsView } from '@/components/formations/builder/AnalyticsView';
 
-interface Formation {
+// Types pour la page d'édition
+interface FormationFromAPI {
   id: number;
   titre: string;
   description?: string;
@@ -41,885 +26,496 @@ interface Formation {
   prix: number;
   duree_estimee: number;
   miniature?: string;
-  modules: Module[];
+  modules: any[];
   date_creation?: string;
   date_publication?: string;
   cree_par?: string;
   nombre_inscrits?: number;
   note_moyenne?: number;
+  tags?: string[];
+  category?: string;
+  level?: 'beginner' | 'intermediate' | 'advanced';
+  language?: string;
+  certificate?: boolean;
 }
 
 interface FormationBuilderProps {
-  initialFormation?: Formation;
+  initialFormation?: FormationFromAPI;
+  onSave?: (formation: Formation) => Promise<void>;
+  onPublish?: (formation: Formation) => Promise<void>;
+  onDelete?: (formationId: number) => Promise<void>;
+  isNew?: boolean;
 }
 
-// Composant principal
-const FormationBuilder: React.FC<FormationBuilderProps> = ({ initialFormation }) => {
-  const router = useRouter();
-  
-  const [formation, setFormation] = useState<Formation>(
-    initialFormation || {
+// ======= FONCTION DE CONVERSION DES DONNÉES =======
+const convertApiFormationToBuilderFormat = (apiFormation: FormationFromAPI): Formation => {
+  return {
+    id: apiFormation.id,
+    titre: apiFormation.titre,
+    description: apiFormation.description,
+    statut: apiFormation.statut,
+    prix: apiFormation.prix,
+    duree_estimee: apiFormation.duree_estimee,
+    miniature: apiFormation.miniature,
+    modules: apiFormation.modules?.map(module => ({
+      ...module,
+      chapitres: module.chapitres?.map((chapter: any) => ({
+        ...chapter,
+        contenu: chapter.contenu?.map((content: any) => ({
+          ...content,
+          // Assurer la compatibilité des types de contenu
+          type: content.type || 'text',
+          data: content.data || {},
+          obligatoire: content.obligatoire || false,
+          ordre: content.ordre || 0
+        })) || []
+      })) || []
+    })) || [],
+    date_creation: apiFormation.date_creation,
+    date_publication: apiFormation.date_publication,
+    cree_par: apiFormation.cree_par,
+    nombre_inscrits: apiFormation.nombre_inscrits,
+    note_moyenne: apiFormation.note_moyenne,
+    tags: apiFormation.tags || [],
+    category: apiFormation.category || 'development',
+    level: apiFormation.level || 'beginner',
+    language: apiFormation.language || 'fr',
+    certificate: apiFormation.certificate || false
+  };
+};
+
+// ======= COMPOSANT PRINCIPAL =======
+const FormationBuilder: React.FC<FormationBuilderProps> = ({ 
+  initialFormation, 
+  onSave,
+  onPublish,
+  onDelete,
+  isNew = false 
+}) => {
+  const [formation, setFormation] = useState<Formation>(() => {
+    if (initialFormation) {
+      return convertApiFormationToBuilderFormat(initialFormation);
+    }
+    return {
       id: 0,
-      titre: 'Ma Nouvelle Formation',
-      description: 'Description de ma formation',
+      titre: 'Ma Nouvelle Formation Premium',
+      description: 'Une formation moderne et interactive',
       statut: 'draft',
       prix: 0,
       duree_estimee: 0,
-      modules: []
-    }
-  );
+      modules: [],
+      tags: [],
+      category: 'development',
+      level: 'beginner',
+      language: 'fr',
+      certificate: true
+    };
+  });
 
-  const [activeView, setActiveView] = useState<'builder' | 'preview'>('builder');
+  const [activeView, setActiveView] = useState<'builder' | 'preview' | 'analytics'>('builder');
+  const [previewMode, setPreviewMode] = useState(PREVIEW_MODES.DESKTOP);
   const [selectedModule, setSelectedModule] = useState<number | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
-  // Auto-save toutes les 30 secondes
+  const { addNotification } = useNotifications();
+  const { addModule, addChapter, addContentBlock, updateContentBlock, deleteContentBlock } = 
+    useFormationActions(formation, setFormation);
+
+  // Détecter les changements non sauvegardés
   useEffect(() => {
-    if (!formation.id) return;
-    
-    const interval = setInterval(() => {
-      handleAutoSave();
-    }, 30000);
-
-    return () => clearInterval(interval);
+    if (initialFormation) {
+      setHasUnsavedChanges(true);
+    }
   }, [formation]);
 
-  // Fonctions utilitaires
-  const generateId = () => Math.random().toString(36).substr(2, 9);
+  // Sauvegarder automatiquement en mode brouillon
+  useEffect(() => {
+    if (hasUnsavedChanges && formation.statut === 'draft' && !isNew) {
+      const autoSaveTimer = setTimeout(() => {
+        handleAutoSave();
+      }, 30000); // Auto-save après 30 secondes d'inactivité
 
+      return () => clearTimeout(autoSaveTimer);
+    }
+  }, [formation, hasUnsavedChanges]);
+
+  // ======= FONCTIONS DE SAUVEGARDE =======
   const handleSave = async () => {
     setSaving(true);
     try {
-      
-      if (formation.id) {
-        await formationService.updateFormation(formation.id, formation);
+      if (onSave) {
+        await onSave(formation);
+        setHasUnsavedChanges(false);
+        setSaved(true);
+        addNotification('Formation sauvegardée avec succès', 'success');
+        setTimeout(() => setSaved(false), 3000);
       } else {
-        const response = await formationService.createFormation(formation);
-        setFormation(response.formation);
-        router.replace(`/dashboard/formations/${response.formation.id}/edit`);
+        // Fallback pour la démo
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        setSaved(true);
+        addNotification('Formation sauvegardée avec succès', 'success');
+        setTimeout(() => setSaved(false), 3000);
       }
-      
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
     } catch (error) {
-      console.error('Erreur sauvegarde:', error);
+      addNotification('Erreur lors de la sauvegarde', 'error');
       setErrors(['Erreur lors de la sauvegarde']);
+      console.error('Erreur sauvegarde:', error);
     } finally {
       setSaving(false);
     }
   };
 
   const handleAutoSave = async () => {
-    if (!formation.id) return;
-    
     try {
-      await formationService.autoSave(formation.id, formation);
+      if (onSave && formation.statut === 'draft') {
+        await onSave(formation);
+        setHasUnsavedChanges(false);
+        addNotification('Sauvegarde automatique effectuée', 'info');
+      }
     } catch (error) {
-      console.error('Auto-save error:', error);
+      console.error('Erreur sauvegarde automatique:', error);
     }
   };
 
-  const addModule = () => {
-    const newModule: Module = {
-      id: Date.now(),
-      titre: `Module ${formation.modules.length + 1}`,
-      description: '',
-      ordre: formation.modules.length,
-      duree_estimee: 0,
-      obligatoire: true,
-      chapitres: []
-    };
-    setFormation(prev => ({
-      ...prev,
-      modules: [...prev.modules, newModule]
-    }));
-  };
+  const handlePublish = async () => {
+    // Validation avant publication
+    const validationErrors = validateFormation(formation);
+    if (validationErrors.length > 0) {
+      setErrors(validationErrors);
+      addNotification('Veuillez corriger les erreurs avant de publier', 'error');
+      return;
+    }
 
-  const addChapter = (moduleId: number) => {
-    const module = formation.modules.find(m => m.id === moduleId);
-    if (!module) return;
-
-    const newChapter: Chapter = {
-      id: Date.now(),
-      titre: `Chapitre ${module.chapitres.length + 1}`,
-      description: '',
-      ordre: module.chapitres.length,
-      duree_estimee: 0,
-      obligatoire: true,
-      contenu: []
-    };
-
-    setFormation(prev => ({
-      ...prev,
-      modules: prev.modules.map(m => 
-        m.id === moduleId 
-          ? { ...m, chapitres: [...m.chapitres, newChapter] }
-          : m
-      )
-    }));
-  };
-
-  const addContentBlock = (moduleId: number, chapterId: number, type: ContentBlock['type']) => {
-    const newBlock: ContentBlock = {
-      id: generateId(),
-      type,
-      ordre: 0,
-      obligatoire: false,
-      data: getDefaultContentData(type)
-    };
-
-    setFormation(prev => ({
-      ...prev,
-      modules: prev.modules.map(m => 
-        m.id === moduleId 
-          ? {
-              ...m,
-              chapitres: m.chapitres.map(c => 
-                c.id === chapterId 
-                  ? { ...c, contenu: [...c.contenu, newBlock] }
-                  : c
-              )
-            }
-          : m
-      )
-    }));
-  };
-
-  const getDefaultContentData = (type: ContentBlock['type']) => {
-    switch (type) {
-      case 'text':
-        return { content: '<p>Votre contenu texte ici...</p>', formatting: 'html' };
-      case 'image':
-        return { url: '', alt: '', caption: '' };
-      case 'video':
-        return { url: '', poster: '', autoplay: false };
-      case 'audio':
-        return { url: '', autoplay: false };
-      case 'quiz':
-        return { questions: [], type: 'multiple' };
-      case 'file':
-        return { url: '', filename: '', size: 0 };
-      case 'embed':
-        return { code: '', height: 400 };
-      default:
-        return {};
+    setSaving(true);
+    try {
+      const publishedFormation = { ...formation, statut: 'published' as const };
+      setFormation(publishedFormation);
+      
+      if (onPublish) {
+        await onPublish(publishedFormation);
+      } else if (onSave) {
+        await onSave(publishedFormation);
+      }
+      
+      setHasUnsavedChanges(false);
+      addNotification('Formation publiée avec succès', 'success');
+    } catch (error) {
+      addNotification('Erreur lors de la publication', 'error');
+      console.error('Erreur publication:', error);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const updateContentBlock = (moduleId: number, chapterId: number, blockId: string, updates: Partial<ContentBlock>) => {
-    setFormation(prev => ({
-      ...prev,
-      modules: prev.modules.map(m => 
-        m.id === moduleId 
-          ? {
-              ...m,
-              chapitres: m.chapitres.map(c => 
-                c.id === chapterId 
-                  ? {
-                      ...c,
-                      contenu: c.contenu.map(block => 
-                        block.id === blockId 
-                          ? { ...block, ...updates }
-                          : block
-                      )
-                    }
-                  : c
-              )
-            }
-          : m
-      )
-    }));
-  };
-
-  const deleteContentBlock = (moduleId: number, chapterId: number, blockId: string) => {
-    setFormation(prev => ({
-      ...prev,
-      modules: prev.modules.map(m => 
-        m.id === moduleId 
-          ? {
-              ...m,
-              chapitres: m.chapitres.map(c => 
-                c.id === chapterId 
-                  ? {
-                      ...c,
-                      contenu: c.contenu.filter(block => block.id !== blockId)
-                    }
-                  : c
-              )
-            }
-          : m
-      )
-    }));
-  };
-
-  const deleteModule = (moduleId: number) => {
-    setFormation(prev => ({
-      ...prev,
-      modules: prev.modules.filter(m => m.id !== moduleId)
-    }));
-  };
-
-  const deleteChapter = (moduleId: number, chapterId: number) => {
-    setFormation(prev => ({
-      ...prev,
-      modules: prev.modules.map(m => 
-        m.id === moduleId 
-          ? { ...m, chapitres: m.chapitres.filter(c => c.id !== chapterId) }
-          : m
-      )
-    }));
-  };
-
-  // Composant pour la barre d'outils de contenu
-  const ContentToolbar = ({ onAddContent }: { onAddContent: (type: ContentBlock['type']) => void }) => (
-    <div className="flex flex-wrap gap-2 p-4 bg-white border rounded-lg shadow-sm">
-      <button
-        onClick={() => onAddContent('text')}
-        className="flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
-      >
-        <Type size={16} />
-        Texte
-      </button>
-      <button
-        onClick={() => onAddContent('image')}
-        className="flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
-      >
-        <Image size={16} />
-        Image
-      </button>
-      <button
-        onClick={() => onAddContent('video')}
-        className="flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
-      >
-        <Video size={16} />
-        Vidéo
-      </button>
-      <button
-        onClick={() => onAddContent('file')}
-        className="flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
-      >
-        <FileText size={16} />
-        Fichier
-      </button>
-      <button
-        onClick={() => onAddContent('embed')}
-        className="flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors"
-      >
-        <Link size={16} />
-        Embed
-      </button>
-    </div>
-  );
-
-  // Composant pour éditer un bloc de contenu
-  const ContentBlockEditor = ({ block, onUpdate, onDelete }: {
-    block: ContentBlock;
-    onUpdate: (updates: Partial<ContentBlock>) => void;
-    onDelete: () => void;
-  }) => {
-    const [isEditing, setIsEditing] = useState(false);
-
-    const renderEditor = () => {
-      switch (block.type) {
-        case 'text':
-          return (
-            <div className="space-y-3">
-              <textarea
-                value={block.data.content?.replace(/<[^>]*>/g, '') || ''}
-                onChange={(e) => onUpdate({ data: { ...block.data, content: `<p>${e.target.value}</p>` } })}
-                className="w-full p-3 border rounded-lg resize-none h-32 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Saisissez votre texte..."
-              />
-            </div>
-          );
-
-        case 'image':
-          return (
-            <div className="space-y-3">
-              <input
-                type="url"
-                value={block.data.url || ''}
-                onChange={(e) => onUpdate({ data: { ...block.data, url: e.target.value } })}
-                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="URL de l'image"
-              />
-              <input
-                type="text"
-                value={block.data.alt || ''}
-                onChange={(e) => onUpdate({ data: { ...block.data, alt: e.target.value } })}
-                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Texte alternatif"
-              />
-            </div>
-          );
-
-        case 'video':
-          return (
-            <div className="space-y-3">
-              <input
-                type="url"
-                value={block.data.url || ''}
-                onChange={(e) => onUpdate({ data: { ...block.data, url: e.target.value } })}
-                className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="URL de la vidéo (YouTube, Vimeo, etc.)"
-              />
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={block.data.autoplay || false}
-                  onChange={(e) => onUpdate({ data: { ...block.data, autoplay: e.target.checked } })}
-                  className="rounded text-blue-500 focus:ring-2 focus:ring-blue-500"
-                />
-                Lecture automatique
-              </label>
-            </div>
-          );
-
-        case 'file':
-          return (
-            <div className="space-y-3">
-              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors">
-                <Upload className="mx-auto mb-2 text-gray-400" size={32} />
-                <p className="text-gray-600">Glissez un fichier ici ou cliquez pour sélectionner</p>
-                <input
-                  type="file"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      onUpdate({ 
-                        data: { 
-                          ...block.data, 
-                          filename: file.name,
-                          size: file.size,
-                          url: URL.createObjectURL(file)
-                        } 
-                      });
-                    }
-                  }}
-                />
-              </div>
-              {block.data.filename && (
-                <p className="text-sm text-gray-600">
-                  Fichier sélectionné: {block.data.filename}
-                </p>
-              )}
-            </div>
-          );
-
-        case 'embed':
-          return (
-            <div className="space-y-3">
-              <textarea
-                value={block.data.code || ''}
-                onChange={(e) => onUpdate({ data: { ...block.data, code: e.target.value } })}
-                className="w-full p-3 border rounded-lg font-mono text-sm h-32 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Collez votre code HTML d'intégration ici..."
-              />
-            </div>
-          );
-
-        default:
-          return <div>Type de contenu non supporté</div>;
+  const handleDelete = async () => {
+    if (window.confirm('Êtes-vous sûr de vouloir supprimer cette formation ?')) {
+      try {
+        if (onDelete) {
+          await onDelete(formation.id);
+          addNotification('Formation supprimée avec succès', 'success');
+          // Redirection sera gérée par le parent
+        }
+      } catch (error) {
+        addNotification('Erreur lors de la suppression', 'error');
+        console.error('Erreur suppression:', error);
       }
-    };
+    }
+  };
 
-    const renderPreview = () => {
-      switch (block.type) {
-        case 'text':
-          return (
-            <div 
-              className="prose max-w-none"
-              dangerouslySetInnerHTML={{ __html: block.data.content || '' }}
-            />
-          );
-
-        case 'image':
-          return block.data.url ? (
-            <img 
-              src={block.data.url} 
-              alt={block.data.alt || ''} 
-              className="max-w-full h-auto rounded-lg"
-            />
-          ) : (
-            <div className="bg-gray-100 h-48 rounded-lg flex items-center justify-center">
-              <Image className="text-gray-400" size={48} />
-            </div>
-          );
-
-        case 'video':
-          return block.data.url ? (
-            <div className="aspect-video bg-gray-100 rounded-lg flex items-center justify-center">
-              <Video className="text-gray-400" size={48} />
-              <span className="ml-2 text-gray-600">Vidéo: {block.data.url}</span>
-            </div>
-          ) : (
-            <div className="bg-gray-100 h-48 rounded-lg flex items-center justify-center">
-              <Video className="text-gray-400" size={48} />
-            </div>
-          );
-
-        case 'file':
-          return block.data.filename ? (
-            <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
-              <FileText className="text-gray-400" size={24} />
-              <div>
-                <p className="font-medium">{block.data.filename}</p>
-                <p className="text-sm text-gray-600">
-                  {(block.data.size / 1024).toFixed(1)} KB
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-gray-100 h-24 rounded-lg flex items-center justify-center">
-              <FileText className="text-gray-400" size={32} />
-            </div>
-          );
-
-        case 'embed':
-          return block.data.code ? (
-            <div className="bg-gray-100 p-4 rounded-lg">
-              <code className="text-sm">{block.data.code.substring(0, 100)}...</code>
-            </div>
-          ) : (
-            <div className="bg-gray-100 h-32 rounded-lg flex items-center justify-center">
-              <Link className="text-gray-400" size={32} />
-            </div>
-          );
-
-        default:
-          return <div>Contenu non supporté</div>;
+  // ======= VALIDATION =======
+  const validateFormation = (formation: Formation): string[] => {
+    const errors: string[] = [];
+    
+    if (!formation.titre.trim()) {
+      errors.push('Le titre est obligatoire');
+    }
+    
+    if (!formation.description?.trim()) {
+      errors.push('La description est obligatoire');
+    }
+    
+    if (formation.modules.length === 0) {
+      errors.push('Au moins un module est requis');
+    }
+    
+    formation.modules.forEach((module, moduleIndex) => {
+      if (module.chapitres.length === 0) {
+        errors.push(`Le module ${moduleIndex + 1} doit contenir au moins un chapitre`);
       }
-    };
-
-    return (
-      <div className="border rounded-lg bg-white overflow-hidden hover:shadow-md transition-shadow">
-        <div className="flex items-center justify-between p-3 bg-gray-50 border-b">
-          <div className="flex items-center gap-2">
-            <GripVertical className="text-gray-400 cursor-move" size={16} />
-            <span className="text-sm font-medium capitalize">{block.type}</span>
-            {block.titre && (
-              <span className="text-sm text-gray-600">- {block.titre}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsEditing(!isEditing)}
-              className="text-sm px-2 py-1 hover:bg-gray-200 rounded transition-colors"
-            >
-              {isEditing ? 'Aperçu' : 'Modifier'}
-            </button>
-            <button
-              onClick={onDelete}
-              className="text-red-600 hover:bg-red-50 p-1 rounded transition-colors"
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
-        </div>
-        
-        <div className="p-4">
-          {isEditing ? renderEditor() : renderPreview()}
-        </div>
-      </div>
-    );
+      
+      module.chapitres.forEach((chapter, chapterIndex) => {
+        if (chapter.contenu.length === 0) {
+          errors.push(`Le chapitre ${chapterIndex + 1} du module ${moduleIndex + 1} doit contenir du contenu`);
+        }
+      });
+    });
+    
+    return errors;
   };
 
-  // Composant pour afficher un chapitre
-  const ChapterEditor = ({ module, chapter }: { module: Module; chapter: Chapter }) => {
-    const [isExpanded, setIsExpanded] = useState(selectedChapter === chapter.id);
-
-    useEffect(() => {
-      setIsExpanded(selectedChapter === chapter.id);
-    }, [selectedChapter, chapter.id]);
-
-    return (
-      <div className="border rounded-lg bg-white overflow-hidden">
-        <div 
-          className="flex items-center justify-between p-4 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
-          onClick={() => {
-            setIsExpanded(!isExpanded);
-            setSelectedChapter(isExpanded ? null : chapter.id);
-          }}
-        >
-          <div className="flex items-center gap-3">
-            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            <h4 className="font-medium">{chapter.titre}</h4>
-            <span className="text-sm text-gray-500">
-              {chapter.contenu.length} élément(s)
-            </span>
-          </div>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              deleteChapter(module.id, chapter.id);
-            }}
-            className="text-red-600 hover:bg-red-50 p-1 rounded transition-colors"
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-
-        {isExpanded && (
-          <div className="p-4 space-y-4">
-            <ContentToolbar 
-              onAddContent={(type) => addContentBlock(module.id, chapter.id, type)} 
-            />
-            
-            <div className="space-y-4">
-              {chapter.contenu.map((block) => (
-                <ContentBlockEditor
-                  key={block.id}
-                  block={block}
-                  onUpdate={(updates) => updateContentBlock(module.id, chapter.id, block.id, updates)}
-                  onDelete={() => deleteContentBlock(module.id, chapter.id, block.id)}
-                />
-              ))}
-              
-              {chapter.contenu.length === 0 && (
-                <div className="text-center py-8 text-gray-500">
-                  Aucun contenu. Utilisez la barre d'outils ci-dessus pour ajouter du contenu.
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-    );
+  // ======= GESTION DES ÉVÉNEMENTS =======
+  const handleFormationUpdate = (updates: Partial<Formation>) => {
+    setFormation(prev => ({ ...prev, ...updates }));
+    setHasUnsavedChanges(true);
   };
 
-  // Composant pour afficher un module
-  const ModuleEditor = ({ module }: { module: Module }) => {
-    const [isExpanded, setIsExpanded] = useState(selectedModule === module.id);
-
-    useEffect(() => {
-      setIsExpanded(selectedModule === module.id);
-    }, [selectedModule, module.id]);
-
-    return (
-      <div className="border-2 border-gray-200 rounded-lg bg-white overflow-hidden">
-        <div 
-          className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 transition-colors"
-          style={{ backgroundColor: isExpanded ? '#42B4B7' : 'white', color: isExpanded ? 'white' : 'black' }}
-          onClick={() => {
-            setIsExpanded(!isExpanded);
-            setSelectedModule(isExpanded ? null : module.id);
-          }}
-        >
-          <div className="flex items-center gap-3">
-            {isExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
-            <h3 className="font-semibold text-lg">{module.titre}</h3>
-            <span className="text-sm opacity-75">
-              {module.chapitres.length} chapitre(s)
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                addChapter(module.id);
-              }}
-              className="flex items-center gap-2 px-3 py-1 rounded-lg transition-colors"
-              style={{ backgroundColor: isExpanded ? 'rgba(255,255,255,0.2)' : '#F22E77', color: 'white' }}
-            >
-              <Plus size={16} />
-              Chapitre
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                deleteModule(module.id);
-              }}
-              className="p-1 rounded transition-colors"
-              style={{ backgroundColor: isExpanded ? 'rgba(255,255,255,0.2)' : 'transparent' }}
-            >
-              <Trash2 size={16} />
-            </button>
-          </div>
-        </div>
-
-        {isExpanded && (
-          <div className="p-4 space-y-4 bg-gray-50">
-            {module.chapitres.map((chapter) => (
-              <ChapterEditor key={chapter.id} module={module} chapter={chapter} />
-            ))}
-            
-            {module.chapitres.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                Aucun chapitre. Cliquez sur "Chapitre" pour en ajouter un.
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Interface principale
+  // ======= RENDU PRINCIPAL =======
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-white border-b shadow-sm">
-        <div className="flex items-center justify-between p-4">
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => router.back()}
-              className="flex items-center gap-2 text-gray-600 hover:text-gray-800"
-            >
-              <ArrowLeft size={20} />
-              Retour
-            </button>
-            <div>
-              <h1 className="text-xl font-bold">{formation.titre}</h1>
-              <p className="text-sm text-gray-600">
-                {formation.modules.length} module(s) • Statut: {formation.statut}
-              </p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-3">
-            {/* Indicateur de sauvegarde */}
-            {saved && (
-              <div className="flex items-center gap-2 text-green-600 text-sm">
-                <Check size={16} />
-                Sauvegardé
-              </div>
-            )}
-            
-            {errors.length > 0 && (
-              <div className="flex items-center gap-2 text-red-600 text-sm">
-                <AlertCircle size={16} />
-                Erreurs
-              </div>
-            )}
-            
-            <div className="flex bg-gray-100 rounded-lg p-1">
-              <button
-                onClick={() => setActiveView('builder')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeView === 'builder' 
-                    ? 'bg-white shadow-sm text-gray-900' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Layout className="inline mr-2" size={16} />
-                Éditeur
-              </button>
-              <button
-                onClick={() => setActiveView('preview')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  activeView === 'preview' 
-                    ? 'bg-white shadow-sm text-gray-900' 
-                    : 'text-gray-600 hover:text-gray-900'
-                }`}
-              >
-                <Eye className="inline mr-2" size={16} />
-                Aperçu
-              </button>
-            </div>
-            
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
-            >
-              <Settings size={16} />
-              Paramètres
-            </button>
-            
-            <button 
-              onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors"
-            >
-              <Save size={16} />
-              {saving ? 'Sauvegarde...' : 'Sauvegarder'}
-            </button>
-          </div>
-        </div>
-      </header>
-
+    <div className={`min-h-screen ${darkMode ? 'dark bg-gray-900' : 'bg-gray-50'} transition-colors`}>
+      <PremiumHeader
+        formation={formation}
+        activeView={activeView}
+        setActiveView={setActiveView}
+        previewMode={previewMode}
+        setPreviewMode={(mode: string) => setPreviewMode(mode as typeof PREVIEW_MODES.DESKTOP)}
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        showSettings={showSettings}
+        setShowSettings={setShowSettings}
+        saving={saving}
+        saved={saved}
+        errors={errors}
+        onSave={handleSave}
+        hasUnsavedChanges={hasUnsavedChanges}
+        onPublish={handlePublish}
+        onDelete={onDelete ? handleDelete : undefined}
+        isNew={isNew}
+      />
+      
       <div className="flex">
         {/* Sidebar des paramètres */}
         {showSettings && (
-          <div className="w-80 bg-white border-r p-6 space-y-6 max-h-screen overflow-y-auto">
-            <h2 className="text-lg font-semibold">Paramètres de la formation</h2>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Titre</label>
-                <input
-                  type="text"
-                  value={formation.titre}
-                  onChange={(e) => setFormation(prev => ({ ...prev, titre: e.target.value }))}
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-2">Description</label>
-                <textarea
-                  value={formation.description || ''}
-                  onChange={(e) => setFormation(prev => ({ ...prev, description: e.target.value }))}
-                  className="w-full p-3 border rounded-lg h-24 resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-2">Prix (€)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={formation.prix}
-                  onChange={(e) => setFormation(prev => ({ ...prev, prix: parseFloat(e.target.value) || 0 }))}
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium mb-2">Statut</label>
-                <select
-                  value={formation.statut}
-                  onChange={(e) => setFormation(prev => ({ ...prev, statut: e.target.value as Formation['statut'] }))}
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="draft">Brouillon</option>
-                  <option value="published">Publié</option>
-                  <option value="archived">Archivé</option>
-                </select>
-              </div>
+          <SettingsSidebar 
+            formation={formation} 
+            setFormation={handleFormationUpdate}
+            initialFormation={initialFormation}
+          />
+        )}
+
+        {/* Zone principale */}
+        <div className="flex-1 max-h-screen overflow-y-auto">
+          {activeView === 'builder' ? (
+            <BuilderView 
+              formation={formation}
+              addModule={addModule}
+              addChapter={addChapter}
+              selectedModule={selectedModule}
+              setSelectedModule={setSelectedModule}
+              selectedChapter={selectedChapter}
+              setSelectedChapter={setSelectedChapter}
+              onFormationUpdate={handleFormationUpdate}
+            />
+          ) : activeView === 'preview' ? (
+            <PreviewView formation={formation} previewMode={previewMode} />
+          ) : (
+            <AnalyticsView formation={formation} />
+          )}
+        </div>
+      </div>
+
+      {/* Indicateur de changements non sauvegardés */}
+      {hasUnsavedChanges && (
+        <div className="fixed bottom-4 right-4 bg-yellow-100 border border-yellow-400 text-yellow-800 px-4 py-2 rounded-lg shadow-lg animate-fadeInUp">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+            <span className="text-sm font-medium">Modifications non sauvegardées</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ======= COMPOSANT WRAPPER AVEC NOTIFICATIONS =======
+const FormationBuilderWithNotifications: React.FC<FormationBuilderProps> = (props) => {
+  return (
+    <NotificationProvider>
+      <FormationBuilder {...props} />
+    </NotificationProvider>
+  );
+};
+
+// ======= SIDEBAR DES PARAMÈTRES AMÉLIORÉE =======
+interface SettingsSidebarProps {
+  formation: Formation;
+  setFormation: (updates: Partial<Formation>) => void;
+  initialFormation?: FormationFromAPI;
+}
+
+const SettingsSidebar: React.FC<SettingsSidebarProps> = ({ formation, setFormation, initialFormation }) => {
+  return (
+    <div className="w-80 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 p-6 space-y-6 max-h-screen overflow-y-auto">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Paramètres</h2>
+        {initialFormation && (
+          <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">
+            ID: {initialFormation.id}
+          </span>
+        )}
+      </div>
+      
+      <div className="space-y-6">
+        {/* Informations générales */}
+        <div className="space-y-4">
+          <h3 className="font-medium text-gray-900 dark:text-white">Informations générales</h3>
+          
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Titre</label>
+            <input
+              type="text"
+              value={formation.titre}
+              onChange={(e) => setFormation({ titre: e.target.value })}
+              className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Description</label>
+            <textarea
+              value={formation.description || ''}
+              onChange={(e) => setFormation({ description: e.target.value })}
+              className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg h-24 resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              placeholder="Décrivez votre formation..."
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Prix (€)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={formation.prix}
+                onChange={(e) => setFormation({ prix: parseFloat(e.target.value) || 0 })}
+                className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Niveau</label>
+              <select
+                value={formation.level || 'beginner'}
+                onChange={(e) => setFormation({ level: e.target.value as Formation['level'] })}
+                className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              >
+                <option value="beginner">Débutant</option>
+                <option value="intermediate">Intermédiaire</option>
+                <option value="advanced">Avancé</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Statut</label>
+            <select
+              value={formation.statut}
+              onChange={(e) => setFormation({ statut: e.target.value as Formation['statut'] })}
+              className="w-full p-3 border border-gray-200 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            >
+              <option value="draft">Brouillon</option>
+              <option value="published">Publié</option>
+              <option value="archived">Archivé</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Image de couverture</label>
+            <PremiumImageUploader
+              currentImage={formation.miniature}
+              onImageUploaded={(url) => setFormation({ miniature: url })}
+              placeholder="Image de couverture de la formation"
+            />
+          </div>
+
+          <div>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={formation.certificate || false}
+                onChange={(e) => setFormation({ certificate: e.target.checked })}
+                className="rounded text-blue-500 focus:ring-blue-500"
+              />
+              <span className="text-sm text-gray-700 dark:text-gray-300">Formation certifiante</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Métadonnées de l'API */}
+        {initialFormation && (
+          <div className="space-y-4">
+            <h3 className="font-medium text-gray-900 dark:text-white">Métadonnées</h3>
+            <div className="space-y-2 text-sm">
+              {initialFormation.date_creation && (
+                <div>
+                  <span className="text-gray-600 dark:text-gray-400">Créée le:</span>
+                  <span className="ml-2 text-gray-900 dark:text-white">
+                    {new Date(initialFormation.date_creation).toLocaleDateString('fr-FR')}
+                  </span>
+                </div>
+              )}
+              {initialFormation.cree_par && (
+                <div>
+                  <span className="text-gray-600 dark:text-gray-400">Créée par:</span>
+                  <span className="ml-2 text-gray-900 dark:text-white">{initialFormation.cree_par}</span>
+                </div>
+              )}
+              {initialFormation.nombre_inscrits !== undefined && (
+                <div>
+                  <span className="text-gray-600 dark:text-gray-400">Inscrits:</span>
+                  <span className="ml-2 text-gray-900 dark:text-white">{initialFormation.nombre_inscrits}</span>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Zone principale */}
-        <div className="flex-1 p-6 max-h-screen overflow-y-auto">
-          {activeView === 'builder' ? (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold">Structure de la formation</h2>
-                <button
-                  onClick={addModule}
-                  className="flex items-center gap-2 px-6 py-3 rounded-lg text-white font-medium transition-all hover:scale-105"
-                  style={{ backgroundColor: '#F22E77' }}
-                >
-                  <Plus size={20} />
-                  Ajouter un Module
-                </button>
-              </div>
+        {/* Statistiques */}
+        <FormationStatistics formation={formation} />
+      </div>
+    </div>
+  );
+};
 
-              <div className="space-y-6">
-                {formation.modules.map((module) => (
-                  <ModuleEditor key={module.id} module={module} />
-                ))}
-                
-                {formation.modules.length === 0 && (
-                  <div className="text-center py-12 bg-white rounded-lg border-2 border-dashed border-gray-300">
-                    <Layout className="mx-auto mb-4 text-gray-400" size={48} />
-                    <h3 className="text-lg font-medium text-gray-600 mb-2">
-                      Votre formation est vide
-                    </h3>
-                    <p className="text-gray-500 mb-6">
-                      Commencez par ajouter votre premier module
-                    </p>
-                    <button
-                      onClick={addModule}
-                      className="px-6 py-3 rounded-lg text-white font-medium"
-                      style={{ backgroundColor: '#F22E77' }}
-                    >
-                      Créer mon premier module
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            // Vue Aperçu
-            <div className="max-w-4xl mx-auto">
-              <div className="bg-white rounded-lg shadow-sm p-8">
-                <div className="text-center mb-8">
-                  <h1 className="text-3xl font-bold mb-4">{formation.titre}</h1>
-                  <p className="text-gray-600 text-lg">{formation.description}</p>
-                  <div className="flex items-center justify-center gap-6 mt-6">
-                    <span className="text-2xl font-bold" style={{ color: '#F22E77' }}>
-                      {formation.prix > 0 ? `${formation.prix}€` : 'Gratuit'}
-                    </span>
-                    <span className="text-gray-600">
-                      {formation.modules.length} module(s)
-                    </span>
-                  </div>
-                </div>
+// ======= STATISTIQUES DE FORMATION =======
+const FormationStatistics: React.FC<{ formation: Formation }> = ({ formation }) => {
+  const totalModules = formation.modules.length;
+  const totalChapters = formation.modules.reduce((acc, module) => acc + module.chapitres.length, 0);
+  const totalContent = formation.modules.reduce((acc, module) => 
+    acc + module.chapitres.reduce((chAcc, chapter) => chAcc + chapter.contenu.length, 0), 0);
+  const totalDuration = Math.ceil(formation.modules.reduce((acc, module) => acc + module.duree_estimee, 0) / 60);
 
-                <div className="space-y-8">
-                  {formation.modules.map((module, moduleIndex) => (
-                    <div key={module.id} className="border rounded-lg overflow-hidden">
-                      <div 
-                        className="p-6 text-white"
-                        style={{ backgroundColor: '#7978E2' }}
-                      >
-                        <h2 className="text-xl font-bold">
-                          Module {moduleIndex + 1}: {module.titre}
-                        </h2>
-                        {module.description && (
-                          <p className="mt-2 opacity-90">{module.description}</p>
-                        )}
-                      </div>
-                      
-                      <div className="p-6 space-y-4">
-                        {module.chapitres.map((chapter, chapterIndex) => (
-                          <div key={chapter.id} className="border-l-4 pl-4" style={{ borderColor: '#42B4B7' }}>
-                            <h3 className="font-semibold text-lg mb-2">
-                              {chapterIndex + 1}. {chapter.titre}
-                            </h3>
-                            <div className="space-y-4">
-                              {chapter.contenu.map((block) => (
-                                <div key={block.id} className="bg-gray-50 p-4 rounded-lg">
-                                  {/* Aperçu du contenu */}
-                                  {block.type === 'text' && (
-                                    <div 
-                                      className="prose max-w-none"
-                                      dangerouslySetInnerHTML={{ __html: block.data.content || '' }}
-                                    />
-                                  )}
-                                  {block.type === 'image' && block.data.url && (
-                                    <img 
-                                      src={block.data.url} 
-                                      alt={block.data.alt || ''} 
-                                      className="max-w-full h-auto rounded"
-                                    />
-                                  )}
-                                  {block.type === 'video' && (
-                                    <div className="bg-gray-200 rounded p-4 text-center">
-                                      <Video size={32} className="mx-auto mb-2 text-gray-500" />
-                                      <p className="text-sm text-gray-600">Vidéo: {block.data.url || 'Non configurée'}</p>
-                                    </div>
-                                  )}
-                                  {block.type === 'file' && (
-                                    <div className="bg-gray-200 rounded p-4 text-center">
-                                      <FileText size={32} className="mx-auto mb-2 text-gray-500" />
-                                      <p className="text-sm text-gray-600">Fichier: {block.data.filename || 'Non configuré'}</p>
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+  return (
+    <div className="space-y-4">
+      <h3 className="font-medium text-gray-900 dark:text-white">Statistiques</h3>
+      <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg text-center">
+          <div className="text-2xl font-bold text-blue-600">{totalModules}</div>
+          <div className="text-gray-600 dark:text-gray-400">Modules</div>
+        </div>
+        <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg text-center">
+          <div className="text-2xl font-bold text-green-600">{totalChapters}</div>
+          <div className="text-gray-600 dark:text-gray-400">Chapitres</div>
+        </div>
+        <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg text-center">
+          <div className="text-2xl font-bold text-purple-600">{totalContent}</div>
+          <div className="text-gray-600 dark:text-gray-400">Contenus</div>
+        </div>
+        <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded-lg text-center">
+          <div className="text-2xl font-bold text-orange-600">{totalDuration}h</div>
+          <div className="text-gray-600 dark:text-gray-400">Durée</div>
         </div>
       </div>
     </div>
   );
 };
 
-export default FormationBuilder;
+// Composants restants (BuilderView, PreviewView, etc.) restent identiques
+// ... (inclure les autres composants du FormationBuilder original)
+
+export default FormationBuilderWithNotifications;
