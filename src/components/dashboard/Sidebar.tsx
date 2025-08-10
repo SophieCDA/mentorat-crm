@@ -27,6 +27,7 @@ interface CountsData {
   tags: number;
   transactions: number;
   campaigns: number;
+  formations: number;
 }
 
 export default function Sidebar({ isOpen, onToggle, onLogout }: SidebarProps) {
@@ -36,7 +37,8 @@ export default function Sidebar({ isOpen, onToggle, onLogout }: SidebarProps) {
     contacts: 0,
     tags: 0,
     transactions: 0,
-    campaigns: 0
+    campaigns: 0,
+    formations: 0
   });
   const [loadingCounts, setLoadingCounts] = useState(true);
 
@@ -52,7 +54,9 @@ export default function Sidebar({ isOpen, onToggle, onLogout }: SidebarProps) {
       // Charger les compteurs en parallèle
       const [contactsRes, tagsRes] = await Promise.allSettled([
         apiClient.get<{ total_contacts: number }>('/api/contacts/count'),
-        apiClient.get<{ total_tags: number }>('/api/tags/stats').then(res => ({ total_tags: res.total_tags }))
+        apiClient.get<{ total_tags: number }>('/api/tags/stats').then(res => ({ total_tags: res.total_tags })),
+        apiClient.get<{ total_formations: number }>('/api/formations/count')
+        
       ]);
 
       // Traiter les résultats
@@ -60,7 +64,8 @@ export default function Sidebar({ isOpen, onToggle, onLogout }: SidebarProps) {
         contacts: contactsRes.status === 'fulfilled' ? contactsRes.value.total_contacts : 0,
         tags: tagsRes.status === 'fulfilled' ? tagsRes.value.total_tags : 0,
         transactions: 0, // À implémenter plus tard
-        campaigns: 0     // À implémenter plus tard
+        campaigns: 0,     // À implémenter plus tard
+        formations: 0 // À implémenter plus tard
       };
 
       setCounts(newCounts);
@@ -105,6 +110,18 @@ export default function Sidebar({ isOpen, onToggle, onLogout }: SidebarProps) {
       icon: (
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+        </svg>
+      ),
+    },
+    {
+      id: 'formations',
+      label: 'Formations',
+      href: '/dashboard/formations',
+      badge: counts.formations > 0 ? counts.formations : null,
+      badgeColor: 'bg-orange-500',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
         </svg>
       ),
     },

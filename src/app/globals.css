@@ -64,4 +64,20 @@
   .animate-pulse-slow {
     animation: pulse-slow 2s infinite;
   }
+
+  .formation-builder {
+    /* Variables CSS pour la charte graphique */
+    --primary-pink: #F22E77;
+    --primary-turquoise: #42B4B7;
+    --primary-purple: #7978E2;
+    --primary-white: #FFFFFF;
+  }
+  
+  .formation-builder .prose {
+    max-width: none;
+  }
+  
+  .formation-builder .prose p {
+    margin-bottom: 0.5rem;
+  }
 }
