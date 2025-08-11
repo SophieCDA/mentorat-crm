@@ -1,583 +1,840 @@
+// app/dashboard/formation/page.tsx
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { 
   Plus, 
   Search, 
   Filter, 
-  Grid, 
-  List, 
-  SortAsc, 
-  SortDesc, 
-  RefreshCw, 
-  TrendingUp,
+  MoreVertical, 
+  Edit3, 
+  Eye, 
+  Copy, 
+  Trash2, 
+  Play, 
+  Pause,
+  Archive,
+  Download,
+  Upload,
   BookOpen,
   Users,
-  Euro,
   Clock,
-  Eye,
-  BarChart3,
-  Download,
+  DollarSign,
+  TrendingUp,
+  Calendar,
   Settings,
-  ChevronDown,
-  X
+  BarChart3,
+  Target,
+  Award,
+  Zap
 } from 'lucide-react';
-import { Formation, FormationFilters } from '@/types/formation.types';
+
+// Services et types
 import { formationService } from '@/lib/services/formation.service';
-import FormationCard from '@/components/formations/FormationCard';
+import { Formation, FormationStats, FormationFilters } from '@/types/formation.types';
 
-// Interface pour les statistiques
-interface FormationStats {
-  total: number;
-  brouillons: number;
-  publiees: number;
-  archivees: number;
-  revenus_total: number;
-  inscriptions_totales: number;
-  note_moyenne?: number; // Made optional
-}
+const colors = {
+  primary: '#F22E77',
+  secondary: '#42B4B7', 
+  accent: '#7978E2',
+  white: '#FFFFFF',
+  success: '#10B981',
+  warning: '#F59E0B',
+  error: '#EF4444'
+};
 
-export default function FormationsPage() {
+// Composant principal
+const FormationDashboard: React.FC = () => {
   const router = useRouter();
+  const searchParams = useSearchParams();
   
-  // États principaux
   const [formations, setFormations] = useState<Formation[]>([]);
   const [stats, setStats] = useState<FormationStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  
-  // États d'interface
-  const [view, setView] = useState<'grid' | 'list'>('grid');
-  const [showFilters, setShowFilters] = useState(false);
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  const [sortBy, setSortBy] = useState<'date_creation' | 'titre' | 'prix' | 'nombre_inscrits'>('date_creation');
-  
-  // Filtres
-  const [filters, setFilters] = useState<FormationFilters>({
-    search: '',
-    statut: undefined,
-    limit: 20,
-    offset: 0,
-    sort_by: 'date_creation',
-    sort_order: 'desc'
-  });
+  const [searchTerm, setSearchTerm] = useState(searchParams?.get('search') || '');
+  const [statusFilter, setStatusFilter] = useState(searchParams?.get('status') || 'all');
+  const [sortBy, setSortBy] = useState(searchParams?.get('sort') || 'date_creation');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>(
+    (searchParams?.get('order') as 'asc' | 'desc') || 'desc'
+  );
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [selectedFormations, setSelectedFormations] = useState<number[]>([]);
+  const [showDropdown, setShowDropdown] = useState<number | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
 
-  // Chargement des données
   useEffect(() => {
-    loadInitialData();
+    loadData();
   }, []);
 
-  useEffect(() => {
-    loadFormations();
-  }, [filters]);
-
-  const loadInitialData = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
-      const [formationsResponse, statsResponse] = await Promise.all([
-        formationService.getFormations(filters),
-        formationService.getStats()
+      await Promise.all([
+        loadFormations(),
+        loadStats()
       ]);
-      
-      setFormations(formationsResponse.formations || []);
-      setStats(statsResponse);
     } catch (error) {
-      console.error('Erreur chargement initial:', error);
+      console.error('Erreur lors du chargement des données:', error);
     } finally {
       setLoading(false);
     }
   };
 
   const loadFormations = async () => {
-    if (loading) return;
-    
     try {
+      const filters: FormationFilters = {};
+      if (statusFilter !== 'all') {
+        filters.status = statusFilter as 'draft' | 'published' | 'archived';
+      }
+      if (searchTerm) {
+        filters.search = searchTerm;
+      }
+      
       const response = await formationService.getFormations(filters);
       setFormations(response.formations || []);
     } catch (error) {
-      console.error('Erreur chargement formations:', error);
+      console.error('Erreur lors du chargement des formations:', error);
     }
   };
 
-  const refreshData = async () => {
-    setRefreshing(true);
+  const loadStats = async () => {
     try {
-      await loadInitialData();
-    } finally {
-      setRefreshing(false);
+      const response = await formationService.getStats();
+      setStats(response);
+    } catch (error) {
+      console.error('Erreur lors du chargement des stats:', error);
     }
   };
 
-  // Actions
-  const handleCreateFormation = async () => {
-    setCreating(true);
+  const createFormation = async () => {
     try {
-      const response = await formationService.createFormation({
+      setIsCreating(true);
+      const newFormationData = {
         titre: 'Nouvelle Formation',
-        description: '',
-        statut: 'draft',
-        prix: 0
-      });
+        description: 'Description de votre formation...',
+        prix: 0,
+        couleur_theme: colors.accent,
+        status: 'draft' as const
+      };
+
+      const response = await formationService.createFormation(newFormationData);
       
-      if (response.formation) {
-        router.push(`/dashboard/formations/${response.formation.id}/edit`);
+      if (response.formation?.id) {
+        router.push(`/dashboard/formation/builder/${response.formation.id}`);
       }
     } catch (error) {
-      console.error('Erreur création formation:', error);
+      console.error('Erreur lors de la création:', error);
+      alert('Erreur lors de la création de la formation');
     } finally {
-      setCreating(false);
+      setIsCreating(false);
     }
   };
 
-  // Gestion des filtres
-  const handleSearchChange = (value: string) => {
-    setFilters(prev => ({ ...prev, search: value, offset: 0 }));
+  const handleFormationAction = async (action: string, formationId: number) => {
+    try {
+      switch (action) {
+        case 'edit':
+          router.push(`/dashboard/formations/builder/${formationId}`);
+          break;
+        
+        case 'preview':
+          window.open(`/formations/preview/${formationId}`, '_blank');
+          break;
+        
+        case 'duplicate':
+          const formation = formations.find(f => f.id === formationId);
+          const newTitle = formation ? `${formation.titre} (Copie)` : undefined;
+          
+          await formationService.duplicateFormation(formationId, newTitle);
+          await loadFormations();
+          alert('Formation dupliquée avec succès !');
+          break;
+        
+        case 'publish':
+          await formationService.publishFormation(formationId);
+          await loadFormations();
+          alert('Formation publiée avec succès !');
+          break;
+        
+        case 'archive':
+          if (confirm('Êtes-vous sûr de vouloir archiver cette formation ?')) {
+            // Vous pouvez ajouter une méthode archiveFormation au service
+            // Pour l'instant, on met à jour le statut
+            await formationService.updateFormation(formationId, { status: 'archived' });
+            await loadFormations();
+            alert('Formation archivée avec succès !');
+          }
+          break;
+        
+        case 'delete':
+          if (confirm('Êtes-vous sûr de vouloir supprimer cette formation ? Cette action est irréversible.')) {
+            await formationService.deleteFormation(formationId);
+            await loadFormations();
+            alert('Formation supprimée avec succès !');
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('Erreur lors de l\'action:', error);
+      alert('Une erreur est survenue lors de l\'opération');
+    }
+    
+    setShowDropdown(null);
   };
 
-  const handleStatusFilter = (status: Formation['statut'] | undefined) => {
-    setFilters(prev => ({ ...prev, statut: status, offset: 0 }));
-  };
+  // Effet pour recharger les formations quand les filtres changent
+  useEffect(() => {
+    const delayedSearch = setTimeout(() => {
+      if (!loading) {
+        loadFormations();
+      }
+    }, 300); // Debounce la recherche
 
-  const handleSort = (field: typeof sortBy) => {
-    const newOrder = field === sortBy && sortOrder === 'desc' ? 'asc' : 'desc';
-    setSortBy(field);
-    setSortOrder(newOrder);
-    setFilters(prev => ({ 
-      ...prev, 
-      sort_by: field, 
-      sort_order: newOrder,
-      offset: 0 
-    }));
-  };
+    return () => clearTimeout(delayedSearch);
+  }, [searchTerm, statusFilter]);
 
-  const clearFilters = () => {
-    setFilters({
-      search: '',
-      statut: undefined,
-      limit: 20,
-      offset: 0,
-      sort_by: 'date_creation',
-      sort_order: 'desc'
+  const filteredAndSortedFormations = formations
+    .sort((a, b) => {
+      let aValue, bValue;
+      
+      switch (sortBy) {
+        case 'titre':
+          aValue = a.titre.toLowerCase();
+          bValue = b.titre.toLowerCase();
+          break;
+        case 'prix':
+          aValue = a.prix;
+          bValue = b.prix;
+          break;
+        case 'inscrits':
+          aValue = a.nombre_inscrits || 0;
+          bValue = b.nombre_inscrits || 0;
+          break;
+        case 'revenus':
+          aValue = a.revenus_totaux || 0;
+          bValue = b.revenus_totaux || 0;
+          break;
+        case 'date_creation':
+        default:
+          aValue = new Date(a.date_creation).getTime();
+          bValue = new Date(b.date_creation).getTime();
+          break;
+      }
+      
+      if (sortOrder === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
     });
-    setSortBy('date_creation');
-    setSortOrder('desc');
+
+  const getStatusBadge = (status: string) => {
+    const statusConfig = {
+      draft: { label: 'Brouillon', color: colors.warning, bg: '#FEF3C7' },
+      published: { label: 'Publié', color: colors.success, bg: '#D1FAE5' },
+      archived: { label: 'Archivé', color: '#6B7280', bg: '#F3F4F6' }
+    };
+
+    const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.draft;
+
+    return (
+      <span
+        className="px-3 py-1 rounded-full text-xs font-medium"
+        style={{ 
+          backgroundColor: config.bg,
+          color: config.color
+        }}
+      >
+        {config.label}
+      </span>
+    );
   };
 
-  // Filtres actifs
-  const activeFiltersCount = useMemo(() => {
-    let count = 0;
-    if (filters.search) count++;
-    if (filters.statut) count++;
-    return count;
-  }, [filters]);
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency: 'EUR',
+      minimumFractionDigits: 0
+    }).format(amount);
+  };
 
-  // Composant de statistiques
-  const StatsCard = ({ title, value, icon, color, trend }: {
-    title: string;
-    value: string | number;
-    icon: React.ReactNode;
-    color: string;
-    trend?: { value: number; isPositive: boolean };
-  }) => (
-    <div className="bg-white rounded-xl border border-gray-200 p-6 hover:shadow-lg transition-all duration-200">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-gray-600 mb-1">{title}</p>
-          <p className="text-2xl font-bold text-gray-900">{value}</p>
-          {trend && (
-            <div className={`flex items-center mt-2 text-sm ${trend.isPositive ? 'text-green-600' : 'text-red-600'}`}>
-              <TrendingUp 
-                size={14} 
-                className={`mr-1 ${!trend.isPositive ? 'rotate-180' : ''}`} 
-              />
-              {Math.abs(trend.value)}%
+  const formatDuration = (minutes: number) => {
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}min` : `${hours}h`;
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div 
+            className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto mb-4"
+            style={{ borderColor: colors.accent }}
+          ></div>
+          <p className="text-gray-600">Chargement du dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-gray-900">Formations</h1>
+              <p className="text-gray-600 mt-1">Gérez vos formations et suivez leurs performances</p>
             </div>
-          )}
+            
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  // Export via le service
+                  const link = document.createElement('a');
+                  link.href = '/api/formations/export';
+                  link.download = 'formations.json';
+                  link.click();
+                }}
+                className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Exporter
+              </button>
+              
+              <button
+                onClick={createFormation}
+                disabled={isCreating}
+                className="flex items-center gap-2 px-6 py-2 rounded-lg font-medium text-white transition-all duration-200 hover:transform hover:-translate-y-1 disabled:opacity-50 shadow-lg"
+                style={{ 
+                  background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})`,
+                  boxShadow: '0 4px 15px rgba(242, 46, 119, 0.3)'
+                }}
+              >
+                <Plus className="w-4 h-4" />
+                {isCreating ? 'Création...' : 'Nouvelle Formation'}
+              </button>
+            </div>
+          </div>
         </div>
-        <div 
-          className="p-3 rounded-lg"
-          style={{ backgroundColor: `${color}20` }}
-        >
-          <div style={{ color }}>{icon}</div>
+
+        {/* Statistiques */}
+        {stats && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Formations totales</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.formations?.total || 0}</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {stats.formations?.published || 0} publiées
+                  </p>
+                </div>
+                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                  <BookOpen className="w-6 h-6 text-blue-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Inscriptions</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.inscriptions?.total || 0}</p>
+                  <div className="flex items-center mt-1">
+                    <TrendingUp className={`w-4 h-4 mr-1 ${(stats.inscriptions?.evolution || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`} />
+                    <p className={`text-sm ${(stats.inscriptions?.evolution || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(stats.inscriptions?.evolution || 0) >= 0 ? '+' : ''}{stats.inscriptions?.evolution || 0}% ce mois
+                    </p>
+                  </div>
+                </div>
+                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                  <Users className="w-6 h-6 text-green-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Revenus</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-1">{formatCurrency(stats.revenus?.total || 0)}</p>
+                  <div className="flex items-center mt-1">
+                    <TrendingUp className={`w-4 h-4 mr-1 ${(stats.revenus?.evolution || 0) >= 0 ? 'text-green-500' : 'text-red-500'}`} />
+                    <p className={`text-sm ${(stats.revenus?.evolution || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {(stats.revenus?.evolution || 0) >= 0 ? '+' : ''}{stats.revenus?.evolution || 0}% ce mois
+                    </p>
+                  </div>
+                </div>
+                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                  <DollarSign className="w-6 h-6 text-purple-600" />
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Taux de complétion</p>
+                  <p className="text-3xl font-bold text-gray-900 mt-1">{stats.engagement?.taux_completion_moyen || 0}%</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Note: {stats.engagement?.note_moyenne || 0}/5
+                  </p>
+                </div>
+                <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
+                  <Target className="w-6 h-6 text-orange-600" />
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Filtres et recherche */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+          <div className="flex flex-col lg:flex-row gap-4 items-center justify-between">
+            <div className="flex flex-col sm:flex-row gap-4 flex-1">
+              <div className="relative flex-1 max-w-md">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Rechercher une formation..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent transition-colors"
+                  style={{ '--tw-ring-color': colors.accent } as React.CSSProperties}
+                />
+              </div>
+
+              <div className="flex gap-3">
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                  style={{ '--tw-ring-color': colors.accent } as React.CSSProperties}
+                >
+                  <option value="all">Tous les statuts</option>
+                  <option value="draft">Brouillons</option>
+                  <option value="published">Publiées</option>
+                  <option value="archived">Archivées</option>
+                </select>
+
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:border-transparent"
+                  style={{ '--tw-ring-color': colors.accent } as React.CSSProperties}
+                >
+                  <option value="date_creation">Date de création</option>
+                  <option value="titre">Titre</option>
+                  <option value="prix">Prix</option>
+                  <option value="inscrits">Nb. inscrits</option>
+                  <option value="revenus">Revenus</option>
+                </select>
+
+                <button
+                  onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+                  className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                  title={sortOrder === 'asc' ? 'Croissant' : 'Décroissant'}
+                >
+                  {sortOrder === 'asc' ? '↑' : '↓'}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={`p-2 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-gray-200' : 'hover:bg-gray-100'}`}
+                title="Vue grille"
+              >
+                <div className="w-4 h-4 grid grid-cols-2 gap-0.5">
+                  <div className="bg-current"></div>
+                  <div className="bg-current"></div>
+                  <div className="bg-current"></div>
+                  <div className="bg-current"></div>
+                </div>
+              </button>
+              <button
+                onClick={() => setViewMode('list')}
+                className={`p-2 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-gray-200' : 'hover:bg-gray-100'}`}
+                title="Vue liste"
+              >
+                <div className="w-4 h-4 flex flex-col gap-0.5">
+                  <div className="h-0.5 bg-current"></div>
+                  <div className="h-0.5 bg-current"></div>
+                  <div className="h-0.5 bg-current"></div>
+                  <div className="h-0.5 bg-current"></div>
+                </div>
+              </button>
+            </div>
+          </div>
         </div>
+
+        {/* Liste des formations */}
+        {viewMode === 'grid' ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredAndSortedFormations.map((formation) => (
+              <FormationCard
+                key={formation.id}
+                formation={formation}
+                onAction={handleFormationAction}
+                showDropdown={showDropdown}
+                setShowDropdown={setShowDropdown}
+                colors={colors}
+                formatCurrency={formatCurrency}
+                formatDuration={formatDuration}
+                getStatusBadge={getStatusBadge}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <FormationTable
+              formations={filteredAndSortedFormations}
+              onAction={handleFormationAction}
+              showDropdown={showDropdown}
+              setShowDropdown={setShowDropdown}
+              colors={colors}
+              formatCurrency={formatCurrency}
+              formatDuration={formatDuration}
+              getStatusBadge={getStatusBadge}
+            />
+          </div>
+        )}
+
+        {/* Message si aucune formation */}
+        {filteredAndSortedFormations.length === 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+            <BookOpen className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">
+              {searchTerm || statusFilter !== 'all' ? 'Aucune formation trouvée' : 'Aucune formation créée'}
+            </h3>
+            <p className="text-gray-600 mb-6">
+              {searchTerm || statusFilter !== 'all' 
+                ? 'Essayez de modifier vos critères de recherche'
+                : 'Commencez par créer votre première formation avec notre builder NO-CODE'
+              }
+            </p>
+            {!searchTerm && statusFilter === 'all' && (
+              <button
+                onClick={createFormation}
+                disabled={isCreating}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-lg font-medium text-white transition-all duration-200 hover:transform hover:-translate-y-1 disabled:opacity-50 shadow-lg"
+                style={{ 
+                  background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})`,
+                  boxShadow: '0 4px 15px rgba(242, 46, 119, 0.3)'
+                }}
+              >
+                <Plus className="w-5 h-5" />
+                {isCreating ? 'Création...' : 'Créer ma première formation'}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
+};
 
+// Composant carte de formation
+const FormationCard: React.FC<{
+  formation: Formation;
+  onAction: (action: string, id: number) => void;
+  showDropdown: number | null;
+  setShowDropdown: (id: number | null) => void;
+  colors: any;
+  formatCurrency: (amount: number) => string;
+  formatDuration: (minutes: number) => string;
+  getStatusBadge: (status: string) => React.ReactNode;
+}> = ({ formation, onAction, showDropdown, setShowDropdown, colors, formatCurrency, formatDuration, getStatusBadge }) => {
   return (
-    <div className="space-y-6 p-6">
-      {/* Header principal */}
-      <div className="bg-gradient-to-r from-white to-gray-50 rounded-xl border border-gray-200 p-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Formations</h1>
-            <p className="text-gray-600">
-              Gérez et créez vos contenus de formation en quelques clics
-            </p>
-          </div>
-          
-          <div className="flex items-center gap-3">
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-lg transition-all duration-300 hover:transform hover:-translate-y-1">
+      {/* Image de couverture */}
+      <div
+        className="h-40 bg-gradient-to-r relative"
+        style={{
+          background: formation.image_couverture 
+            ? `url(${formation.image_couverture}) center/cover`
+            : `linear-gradient(135deg, ${formation.couleur_theme || colors.accent}, ${colors.secondary})`
+        }}
+      >
+        <div className="absolute top-3 left-3">
+          {getStatusBadge(formation.status)}
+        </div>
+        <div className="absolute top-3 right-3">
+          <div className="relative">
             <button
-              onClick={() => router.push('/dashboard/formations/analytics')}
-              className="flex items-center gap-2 px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+              onClick={() => setShowDropdown(showDropdown === formation.id ? null : formation.id)}
+              className="w-8 h-8 bg-white/90 hover:bg-white rounded-full flex items-center justify-center transition-all duration-200"
             >
-              <BarChart3 size={18} />
-              Analytics
+              <MoreVertical className="w-4 h-4 text-gray-700" />
             </button>
             
-            <button
-              onClick={refreshData}
-              disabled={refreshing}
-              className="flex items-center gap-2 px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw size={18} className={refreshing ? 'animate-spin' : ''} />
-              Actualiser
-            </button>
-            
-            <button
-              onClick={handleCreateFormation}
-              disabled={creating}
-              className="flex items-center gap-2 px-6 py-3 text-white rounded-lg font-medium transition-all hover:scale-105 shadow-lg disabled:opacity-50"
-              style={{ backgroundColor: '#F22E77' }}
-            >
-              <Plus size={20} />
-              {creating ? 'Création...' : 'Nouvelle Formation'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Statistiques */}
-      {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatsCard
-            title="Total formations"
-            value={stats.total}
-            icon={<BookOpen size={24} />}
-            color="#7978E2"
-            trend={{ value: 12, isPositive: true }}
-          />
-          <StatsCard
-            title="Apprenants inscrits"
-            value={stats.inscriptions_totales.toLocaleString('fr-FR')}
-            icon={<Users size={24} />}
-            color="#42B4B7"
-            trend={{ value: 8, isPositive: true }}
-          />
-          <StatsCard
-            title="Revenus générés"
-            value={`${stats.revenus_total.toLocaleString('fr-FR')}€`}
-            icon={<Euro size={24} />}
-            color="#F22E77"
-            trend={{ value: 15, isPositive: true }}
-          />
-          <StatsCard
-            title="Note moyenne"
-            value={stats.note_moyenne ? `${stats.note_moyenne.toFixed(1)}/5` : 'N/A'}
-            icon={<TrendingUp size={24} />}
-            color="#10B981"
-            trend={{ value: 3, isPositive: true }}
-          />
-        </div>
-      )}
-
-      {/* Barre de filtres et recherche */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex flex-col lg:flex-row gap-4">
-          {/* Recherche */}
-          <div className="flex-1">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-              <input
-                type="text"
-                placeholder="Rechercher par titre, description..."
-                value={filters.search || ''}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-gray-50 hover:bg-white transition-colors"
-              />
-              {filters.search && (
+            {showDropdown === formation.id && (
+              <div className="absolute right-0 top-10 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-10 min-w-[160px]">
                 <button
-                  onClick={() => handleSearchChange('')}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  onClick={() => onAction('edit', formation.id)}
+                  className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                 >
-                  <X size={16} />
+                  <Edit3 className="w-4 h-4" />
+                  Modifier
                 </button>
-              )}
-            </div>
-          </div>
-
-          {/* Filtres rapides */}
-          <div className="flex flex-wrap items-center gap-3">
-            {/* Filtre statut */}
-            <div className="relative">
-              <select
-                value={filters.statut || ''}
-                onChange={(e) => handleStatusFilter(e.target.value as Formation['statut'] || undefined)}
-                className="appearance-none bg-white border border-gray-300 rounded-lg px-4 py-3 pr-10 focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer"
-              >
-                <option value="">Tous les statuts</option>
-                <option value="draft">📝 Brouillon</option>
-                <option value="published">✅ Publié</option>
-                <option value="archived">📦 Archivé</option>
-              </select>
-              <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 pointer-events-none" size={16} />
-            </div>
-
-            {/* Tri */}
-            <div className="flex items-center bg-gray-50 rounded-lg border border-gray-300">
-              <select
-                value={sortBy}
-                onChange={(e) => handleSort(e.target.value as typeof sortBy)}
-                className="appearance-none bg-transparent border-none px-3 py-3 pr-8 focus:ring-0 focus:outline-none cursor-pointer"
-              >
-                <option value="date_creation">Date de création</option>
-                <option value="titre">Titre</option>
-                <option value="prix">Prix</option>
-                <option value="nombre_inscrits">Nombre d'inscrits</option>
-              </select>
-              <button
-                onClick={() => handleSort(sortBy)}
-                className="px-2 py-1 text-gray-600 hover:text-gray-800"
-              >
-                {sortOrder === 'desc' ? <SortDesc size={16} /> : <SortAsc size={16} />}
-              </button>
-            </div>
-
-            {/* Toggle vue */}
-            <div className="flex bg-gray-100 rounded-lg p-1 border border-gray-300">
-              <button
-                onClick={() => setView('grid')}
-                className={`p-2 rounded transition-all ${
-                  view === 'grid' 
-                    ? 'bg-white shadow-sm text-blue-600' 
-                    : 'text-gray-600 hover:text-gray-800'
-                }`}
-                title="Vue grille"
-              >
-                <Grid size={16} />
-              </button>
-              <button
-                onClick={() => setView('list')}
-                className={`p-2 rounded transition-all ${
-                  view === 'list' 
-                    ? 'bg-white shadow-sm text-blue-600' 
-                    : 'text-gray-600 hover:text-gray-800'
-                }`}
-                title="Vue liste"
-              >
-                <List size={16} />
-              </button>
-            </div>
-
-            {/* Badge filtres actifs */}
-            {activeFiltersCount > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2 py-1 rounded-full">
-                  {activeFiltersCount} filtre{activeFiltersCount > 1 ? 's' : ''}
-                </span>
                 <button
-                  onClick={clearFilters}
-                  className="text-xs text-gray-600 hover:text-gray-800 underline"
+                  onClick={() => onAction('preview', formation.id)}
+                  className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-gray-700"
                 >
-                  Effacer tout
+                  <Eye className="w-4 h-4" />
+                  Aperçu
+                </button>
+                <button
+                  onClick={() => onAction('duplicate', formation.id)}
+                  className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                >
+                  <Copy className="w-4 h-4" />
+                  Dupliquer
+                </button>
+                {formation.status === 'draft' && (
+                  <button
+                    onClick={() => onAction('publish', formation.id)}
+                    className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-green-600"
+                  >
+                    <Play className="w-4 h-4" />
+                    Publier
+                  </button>
+                )}
+                {formation.status === 'published' && (
+                  <button
+                    onClick={() => onAction('archive', formation.id)}
+                    className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-orange-600"
+                  >
+                    <Archive className="w-4 h-4" />
+                    Archiver
+                  </button>
+                )}
+                <hr className="my-2" />
+                <button
+                  onClick={() => onAction('delete', formation.id)}
+                  className="w-full px-4 py-2 text-left hover:bg-red-50 flex items-center gap-2 text-red-600"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Supprimer
                 </button>
               </div>
             )}
           </div>
         </div>
+      </div>
 
-        {/* Filtres de statut rapides */}
-        <div className="flex flex-wrap gap-2 mt-4">
+      {/* Contenu */}
+      <div className="p-5">
+        <h3 className="font-bold text-lg text-gray-900 mb-2 line-clamp-2">
+          {formation.titre}
+        </h3>
+        
+        <p className="text-gray-600 text-sm mb-4 line-clamp-2">
+          {formation.description}
+        </p>
+
+        {/* Métriques principales */}
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <Users className="w-4 h-4" />
+            <span>{formation.nombre_inscrits} inscrits</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <DollarSign className="w-4 h-4" />
+            <span>{formatCurrency(formation.revenus_totaux || 0)}</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <Clock className="w-4 h-4" />
+            <span>{formatDuration(formation.duree_totale_minutes || 0)}</span>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <BookOpen className="w-4 h-4" />
+            <span>{formation.nombre_chapitres_total} chapitres</span>
+          </div>
+        </div>
+
+        {/* Métriques avancées */}
+        <div className="flex items-center justify-between text-sm text-gray-500 mb-4">
+          <span>Complétion: {formation.taux_completion || 0}%</span>
+          <span>Note: {formation.note_moyenne || 0}/5</span>
+        </div>
+
+        {/* Prix */}
+        <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+          <div className="text-2xl font-bold" style={{ color: colors.primary }}>
+            {formatCurrency(formation.prix)}
+          </div>
+          
           <button
-            onClick={() => handleStatusFilter(undefined)}
-            className={`px-3 py-1 text-sm rounded-full transition-colors ${
-              !filters.statut 
-                ? 'bg-gray-900 text-white' 
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+            onClick={() => onAction('edit', formation.id)}
+            className="px-4 py-2 text-sm font-medium text-white rounded-lg transition-all duration-200 hover:transform hover:-translate-y-1"
+            style={{ 
+              background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})`,
+              boxShadow: '0 2px 8px rgba(242, 46, 119, 0.3)'
+            }}
           >
-            Toutes ({stats?.total || 0})
-          </button>
-          <button
-            onClick={() => handleStatusFilter('draft')}
-            className={`px-3 py-1 text-sm rounded-full transition-colors ${
-              filters.statut === 'draft' 
-                ? 'bg-yellow-500 text-white' 
-                : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
-            }`}
-          >
-            Brouillons ({stats?.brouillons || 0})
-          </button>
-          <button
-            onClick={() => handleStatusFilter('published')}
-            className={`px-3 py-1 text-sm rounded-full transition-colors ${
-              filters.statut === 'published' 
-                ? 'bg-green-500 text-white' 
-                : 'bg-green-100 text-green-800 hover:bg-green-200'
-            }`}
-          >
-            Publiées ({stats?.publiees || 0})
-          </button>
-          <button
-            onClick={() => handleStatusFilter('archived')}
-            className={`px-3 py-1 text-sm rounded-full transition-colors ${
-              filters.statut === 'archived' 
-                ? 'bg-gray-500 text-white' 
-                : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
-            }`}
-          >
-            Archivées ({stats?.archivees || 0})
+            Modifier
           </button>
         </div>
       </div>
-
-      {/* Contenu principal */}
-      {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 bg-white rounded-xl border border-gray-200">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 mb-4" style={{ borderColor: '#7978E2' }}></div>
-          <p className="text-gray-600 text-lg">Chargement de vos formations...</p>
-          <p className="text-gray-500 text-sm mt-1">Veuillez patienter quelques instants</p>
-        </div>
-      ) : formations.length > 0 ? (
-        <div className="space-y-4">
-          {/* En-tête de liste avec compteur */}
-          <div className="flex items-center justify-between text-sm text-gray-600 px-1">
-            <span>
-              {formations.length} formation{formations.length > 1 ? 's' : ''} trouvée{formations.length > 1 ? 's' : ''}
-              {filters.search && ` pour "${filters.search}"`}
-            </span>
-            
-            <div className="flex items-center gap-2">
-              <span>Affichage :</span>
-              <span className="font-medium text-gray-900">
-                {view === 'grid' ? 'Grille' : 'Liste'}
-              </span>
-            </div>
-          </div>
-
-          {/* Grille/Liste des formations */}
-          <div className={
-            view === 'grid' 
-              ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6' 
-              : 'space-y-3'
-          }>
-            {formations.map((formation) => (
-              <FormationCard 
-                key={formation.id} 
-                formation={formation} 
-                view={view}
-                onEdit={(formation) => router.push(`/dashboard/formations/${formation.id}/edit`)}
-                onDelete={async (formation) => {
-                  if (window.confirm('Êtes-vous sûr de vouloir supprimer cette formation ?')) {
-                    try {
-                      await formationService.deleteFormation(formation.id);
-                      setFormations(prev => prev.filter(f => f.id !== formation.id));
-                      refreshData(); // Recharger les stats
-                    } catch (error) {
-                      console.error('Erreur suppression:', error);
-                    }
-                  }
-                }}
-                onDuplicate={async (formation) => {
-                  try {
-                    const response = await formationService.duplicateFormation(formation.id);
-                    if (response.formation) {
-                      setFormations(prev => [response.formation, ...prev]);
-                      refreshData(); // Recharger les stats
-                    }
-                  } catch (error) {
-                    console.error('Erreur duplication:', error);
-                  }
-                }}
-                onPublish={async (formation) => {
-                  try {
-                    await formationService.publishFormation(formation.id);
-                    setFormations(prev => prev.map(f => 
-                      f.id === formation.id 
-                        ? { ...f, statut: 'published' as const }
-                        : f
-                    ));
-                    refreshData(); // Recharger les stats
-                  } catch (error) {
-                    console.error('Erreur publication:', error);
-                  }
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      ) : (
-        /* État vide amélioré */
-        <div className="text-center py-16 bg-white rounded-xl border border-gray-200">
-          <div className="max-w-md mx-auto">
-            {filters.search || filters.statut ? (
-              /* Aucun résultat de recherche */
-              <>
-                <div className="w-20 h-20 rounded-full mx-auto mb-6 flex items-center justify-center bg-gray-100">
-                  <Search size={32} className="text-gray-400" />
-                </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  Aucune formation trouvée
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  Aucune formation ne correspond à vos critères de recherche.
-                  <br />Essayez de modifier vos filtres ou votre recherche.
-                </p>
-                <button
-                  onClick={clearFilters}
-                  className="px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
-                >
-                  Effacer les filtres
-                </button>
-              </>
-            ) : (
-              /* Première formation */
-              <>
-                <div 
-                  className="w-20 h-20 rounded-full mx-auto mb-6 flex items-center justify-center"
-                  style={{ backgroundColor: '#F22E7720' }}
-                >
-                  <BookOpen size={32} style={{ color: '#F22E77' }} />
-                </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">
-                  Créez votre première formation
-                </h3>
-                <p className="text-gray-600 mb-8">
-                  Commencez à partager vos connaissances en créant votre première formation.
-                  <br />Utilisez notre éditeur no-code pour une création simple et rapide.
-                </p>
-                <div className="space-y-4">
-                  <button
-                    onClick={handleCreateFormation}
-                    disabled={creating}
-                    className="px-8 py-4 text-white rounded-lg font-medium transition-all hover:scale-105 shadow-lg disabled:opacity-50"
-                    style={{ backgroundColor: '#F22E77' }}
-                  >
-                    {creating ? 'Création...' : '🚀 Créer ma première formation'}
-                  </button>
-                  
-                  <div className="flex items-center justify-center gap-6 text-sm text-gray-500">
-                    <div className="flex items-center gap-2">
-                      <Clock size={16} />
-                      <span>Création en 5 min</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Eye size={16} />
-                      <span>Aperçu temps réel</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Settings size={16} />
-                      <span>Sans code</span>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
-}
+};
+
+// Composant tableau de formations
+const FormationTable: React.FC<{
+  formations: Formation[];
+  onAction: (action: string, id: number) => void;
+  showDropdown: number | null;
+  setShowDropdown: (id: number | null) => void;
+  colors: any;
+  formatCurrency: (amount: number) => string;
+  formatDuration: (minutes: number) => string;
+  getStatusBadge: (status: string) => React.ReactNode;
+}> = ({ formations, onAction, showDropdown, setShowDropdown, colors, formatCurrency, formatDuration, getStatusBadge }) => {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full">
+        <thead className="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Formation</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Statut</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prix</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Inscrits</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Revenus</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Complétion</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="bg-white divide-y divide-gray-200">
+          {formations.map((formation) => (
+            <tr key={formation.id} className="hover:bg-gray-50">
+              <td className="px-6 py-4">
+                <div className="flex items-center">
+                  <div 
+                    className="w-10 h-10 rounded-lg mr-3"
+                    style={{
+                      background: formation.image_couverture 
+                        ? `url(${formation.image_couverture}) center/cover`
+                        : `linear-gradient(135deg, ${formation.couleur_theme || colors.accent}, ${colors.secondary})`
+                    }}
+                  ></div>
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">{formation.titre}</div>
+                    <div className="text-sm text-gray-500">{formation.nombre_modules || 0} modules • {formation.nombre_chapitres_total || 0} chapitres</div>
+                  </div>
+                </div>
+              </td>
+              <td className="px-6 py-4">
+                {getStatusBadge(formation.status)}
+              </td>
+              <td className="px-6 py-4 text-sm text-gray-900">
+                {formatCurrency(formation.prix)}
+              </td>
+              <td className="px-6 py-4 text-sm text-gray-900">
+                {formation.nombre_inscrits || 0}
+              </td>
+              <td className="px-6 py-4 text-sm text-gray-900">
+                {formatCurrency(formation.revenus_totaux || 0)}
+              </td>
+              <td className="px-6 py-4">
+                <div className="flex items-center">
+                  <div className="text-sm text-gray-900 mr-2">{formation.taux_completion || 0}%</div>
+                  <div className="w-16 bg-gray-200 rounded-full h-2">
+                    <div 
+                      className="h-2 rounded-full" 
+                      style={{ 
+                        width: `${formation.taux_completion || 0}%`,
+                        backgroundColor: colors.success
+                      }}
+                    ></div>
+                  </div>
+                </div>
+              </td>
+              <td className="px-6 py-4 text-sm text-gray-500">
+                {new Date(formation.date_creation).toLocaleDateString('fr-FR')}
+              </td>
+              <td className="px-6 py-4 text-right text-sm font-medium">
+                <div className="relative">
+                  <button
+                    onClick={() => setShowDropdown(showDropdown === formation.id ? null : formation.id)}
+                    className="p-1 hover:bg-gray-100 rounded transition-colors"
+                  >
+                    <MoreVertical className="w-4 h-4 text-gray-400" />
+                  </button>
+                  
+                  {showDropdown === formation.id && (
+                    <div className="absolute right-0 top-8 bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-10 min-w-[160px]">
+                      <button
+                        onClick={() => onAction('edit', formation.id)}
+                        className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      >
+                        <Edit3 className="w-4 h-4" />
+                        Modifier
+                      </button>
+                      <button
+                        onClick={() => onAction('preview', formation.id)}
+                        className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      >
+                        <Eye className="w-4 h-4" />
+                        Aperçu
+                      </button>
+                      <button
+                        onClick={() => onAction('duplicate', formation.id)}
+                        className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-gray-700"
+                      >
+                        <Copy className="w-4 h-4" />
+                        Dupliquer
+                      </button>
+                      {formation.status === 'draft' && (
+                        <button
+                          onClick={() => onAction('publish', formation.id)}
+                          className="w-full px-4 py-2 text-left hover:bg-gray-50 flex items-center gap-2 text-green-600"
+                        >
+                          <Play className="w-4 h-4" />
+                          Publier
+                        </button>
+                      )}
+                      <hr className="my-2" />
+                      <button
+                        onClick={() => onAction('delete', formation.id)}
+                        className="w-full px-4 py-2 text-left hover:bg-red-50 flex items-center gap-2 text-red-600"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        Supprimer
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+// Wrapper avec Suspense pour gérer les searchParams
+const FormationDashboardPage: React.FC = () => {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600"></div>
+      </div>
+    }>
+      <FormationDashboard />
+    </Suspense>
+  );
+};
+
+export default FormationDashboardPage;
