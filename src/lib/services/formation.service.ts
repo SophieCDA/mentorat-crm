@@ -1,106 +1,105 @@
-// src/lib/services/formation.service.ts
-import { apiClient } from '@/lib/api/client';
-import { Formation, Module, Chapter, ContentBlock, FormationFilters, FormationStats } from '@/types/formation.types';
+// services/api/formations.ts
+import { Formation } from '@/types/formation.types';
 
-class FormationService {
-  // Formations
-  async getFormations(filters?: FormationFilters) {
-    return await apiClient.get<{ formations: Formation[]; total: number }>('/api/formations', {
-      params: filters
-    });
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+export const formationsAPI = {
+  // Récupérer toutes les formations
+  async getAll(): Promise<Formation[]> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/formations`);
+      if (!response.ok) throw new Error('Erreur lors de la récupération des formations');
+      const data = await response.json();
+      return data.formations || [];
+    } catch (error) {
+      console.error('Erreur:', error);
+      return [];
+    }
+  },
+
+  // Récupérer une formation par ID
+  async getById(id: string | number): Promise<Formation | null> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/formations/${id}`);
+      if (!response.ok) throw new Error('Formation non trouvée');
+      const data = await response.json();
+      return data.formation;
+    } catch (error) {
+      console.error('Erreur:', error);
+      return null;
+    }
+  },
+
+  // Créer une nouvelle formation
+  async create(formation: Formation): Promise<Formation | null> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/formations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formation)
+      });
+      if (!response.ok) throw new Error('Erreur lors de la création');
+      const data = await response.json();
+      return data.formation;
+    } catch (error) {
+      console.error('Erreur:', error);
+      return null;
+    }
+  },
+
+  // Mettre à jour une formation
+  async update(id: string | number, formation: Formation): Promise<Formation | null> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/formations/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formation)
+      });
+      if (!response.ok) throw new Error('Erreur lors de la mise à jour');
+      const data = await response.json();
+      return data.formation;
+    } catch (error) {
+      console.error('Erreur:', error);
+      return null;
+    }
+  },
+
+  // Supprimer une formation
+  async delete(id: string | number): Promise<boolean> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/formations/${id}`, {
+        method: 'DELETE'
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Erreur:', error);
+      return false;
+    }
+  },
+
+  // Publier une formation
+  async publish(id: string | number): Promise<boolean> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/formations/${id}/publish`, {
+        method: 'POST'
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Erreur:', error);
+      return false;
+    }
+  },
+
+  // Archiver une formation
+  async archive(id: string | number): Promise<boolean> {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/formations/${id}/archive`, {
+        method: 'POST'
+      });
+      return response.ok;
+    } catch (error) {
+      console.error('Erreur:', error);
+      return false;
+    }
   }
-
-  async getFormation(id: number) {
-    return await apiClient.get<{ formation: Formation }>(`/api/formations/${id}`);
-  }
-
-  async createFormation(data: Partial<Formation>) {
-    return await apiClient.post<{ formation: Formation }>('/api/formations', data);
-  }
-
-  async updateFormation(id: number, data: Partial<Formation>) {
-    return await apiClient.put<{ formation: Formation }>(`/api/formations/${id}`, data);
-  }
-
-  async deleteFormation(id: number) {
-    return await apiClient.delete(`/api/formations/${id}`);
-  }
-
-  async publishFormation(id: number) {
-    return await apiClient.post(`/api/formations/${id}/publish`);
-  }
-
-  async duplicateFormation(id: number, newTitle?: string) {
-    return await apiClient.post<{ formation: Formation }>(`/api/formations/${id}/duplicate`, {
-      nouveau_titre: newTitle
-    });
-  }
-
-  // Modules
-  async createModule(formationId: number, data: Partial<Module>) {
-    return await apiClient.post<{ module: Module }>(`/api/formations/${formationId}/modules`, data);
-  }
-
-  async updateModule(moduleId: number, data: Partial<Module>) {
-    return await apiClient.put<{ module: Module }>(`/api/modules/${moduleId}`, data);
-  }
-
-  async deleteModule(moduleId: number) {
-    return await apiClient.delete(`/api/modules/${moduleId}`);
-  }
-
-  // Chapitres
-  async createChapter(moduleId: number, data: Partial<Chapter>) {
-    return await apiClient.post<{ chapter: Chapter }>(`/api/modules/${moduleId}/chapters`, data);
-  }
-
-  async updateChapter(chapterId: number, data: Partial<Chapter>) {
-    return await apiClient.put<{ chapter: Chapter }>(`/api/chapters/${chapterId}`, data);
-  }
-
-  async deleteChapter(chapterId: number) {
-    return await apiClient.delete(`/api/chapters/${chapterId}`);
-  }
-
-  async updateChapterContent(chapterId: number, content: ContentBlock[]) {
-    return await apiClient.put(`/api/chapters/${chapterId}/content`, { contenu: content });
-  }
-
-  // Upload de fichiers
-  async uploadFile(file: File, type: 'image' | 'video' | 'audio' | 'document') {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('type', type);
-
-    return await apiClient.post<{
-      url: string;
-      filename: string;
-      size: number;
-      type: string;
-    }>('/api/formations/upload', formData);
-  }
-
-  // Statistiques
-  async getStats() {
-    return await apiClient.get<FormationStats>('/api/formations/stats');
-  }
-
-  // Validation
-  async validateFormation(id: number) {
-    return await apiClient.post<{
-      valid: boolean;
-      errors: string[];
-      warnings: string[];
-    }>(`/api/formations/${id}/validate`);
-  }
-
-  // Auto-save
-  async autoSave(formationId: number, data: any) {
-    return await apiClient.post(`/api/formations/${formationId}/autosave`, {
-      data,
-      timestamp: new Date().toISOString()
-    });
-  }
-}
-
-export const formationService = new FormationService();
+};
