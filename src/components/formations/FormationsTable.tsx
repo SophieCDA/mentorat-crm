@@ -1,15 +1,15 @@
 // components/formations/FormationsTable.tsx
 'use client';
 
+import Link from 'next/link';
 import { Formation } from '@/types/formation.types';
 
 interface FormationsTableProps {
   formations: Formation[];
-  onEdit: (formation: Formation) => void;
   onDelete: (id: string | number) => void;
 }
 
-export default function FormationsTable({ formations, onEdit, onDelete }: FormationsTableProps) {
+export default function FormationsTable({ formations, onDelete }: FormationsTableProps) {
   if (formations.length === 0) {
     return (
       <div className="text-center py-8 bg-gray-50 rounded-lg">
@@ -48,12 +48,12 @@ export default function FormationsTable({ formations, onEdit, onDelete }: Format
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formation.niveau}</td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formation.prix} €</td>
               <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                <button
-                  onClick={() => onEdit(formation)}
+                <Link
+                  href={`/dashboard/formations/${formation.id}`}
                   className="text-crm-purple hover:text-crm-pink mr-3"
                 >
                   Éditer
-                </button>
+                </Link>
                 <button
                   onClick={() => onDelete(formation.id as string | number)}
                   className="text-red-600 hover:text-red-900"

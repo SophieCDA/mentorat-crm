@@ -11,7 +11,6 @@ export default function FormationsPage() {
   const [formations, setFormations] = useState<Formation[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [editingFormation, setEditingFormation] = useState<Formation | null>(null);
 
   useEffect(() => {
     loadFormations();
@@ -32,12 +31,6 @@ export default function FormationsPage() {
   const handleCreateFormation = async (data: Formation) => {
     await formationsAPI.create(data);
     setShowModal(false);
-    await loadFormations();
-  };
-
-  const handleUpdateFormation = async (id: string | number, data: Formation) => {
-    await formationsAPI.update(id, data);
-    setEditingFormation(null);
     await loadFormations();
   };
 
@@ -69,11 +62,7 @@ export default function FormationsPage() {
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-crm-purple"></div>
         </div>
       ) : (
-        <FormationsTable
-          formations={formations}
-          onEdit={(f) => setEditingFormation(f)}
-          onDelete={handleDeleteFormation}
-        />
+        <FormationsTable formations={formations} onDelete={handleDeleteFormation} />
       )}
 
       {showModal && (
@@ -83,13 +72,6 @@ export default function FormationsPage() {
         />
       )}
 
-      {editingFormation && (
-        <FormationModal
-          formation={editingFormation}
-          onSave={(data) => handleUpdateFormation(editingFormation.id as string | number, data)}
-          onClose={() => setEditingFormation(null)}
-        />
-      )}
     </div>
   );
 }
