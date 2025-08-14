@@ -2,7 +2,7 @@
 
 export interface ContentBlock {
   id: string | number;
-  type: 'text' | 'video' | 'quiz' | 'exercise' | 'download';
+  type: 'text' | 'video' | 'quiz' | 'exercise' | 'download' | 'image';
   ordre: number;
   data: any;
   obligatoire: boolean;
