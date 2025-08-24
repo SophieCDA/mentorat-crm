@@ -1,10 +1,11 @@
 import { ContentBlock } from "@/types/formation.types";
-import { PlayCircle, Upload, Check, Download, GripVertical, ChevronDown, ChevronRight, MoreVertical, Copy, Unlock, Trash2, Lock } from "lucide-react";
+import { PlayCircle, Upload, Check, Download, GripVertical, ChevronDown, ChevronRight, MoreVertical, Copy, Unlock, Trash2, Lock, Image } from "lucide-react";
 import { useState } from "react";
-import { RichTextEditor } from "@/components/formations/editor/RichTextEditor";
+import RichTextEditor from "@/components/formations/editor/RichTextEditor";
 import { blockTypesConfig } from "@/types/editor.types";
 import { uploadService } from '@/lib/services/upload.service';
 import { getMediaUrl, getFileUrl, extractYouTubeId, extractVimeoId, formatFileSize } from '@/utils/mediaHelpers';
+import { MediaGallery } from "@/components/formations/editor/MediaGallery";
 
 export const ContentBlockEditor = ({
   block,
@@ -25,6 +26,8 @@ export const ContentBlockEditor = ({
   const [showSettings, setShowSettings] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [showMediaGallery, setShowMediaGallery] = useState(false);
+  const [isDraggable, setIsDraggable] = useState(false);
 
   const blockType = blockTypesConfig[block.type];
 
@@ -40,82 +43,82 @@ export const ContentBlockEditor = ({
       case 'text':
         return (
           <RichTextEditor
-            content={block.data?.content || ''}
+            value={block.data?.content || ''}
             onChange={(content) => onUpdate({ ...block, data: { ...block.data, content } })}
             placeholder="Commencez à écrire votre contenu..."
           />
         );
 
-        case 'video':
-          const handleVideoPreview = () => {
-            if (block.data?.url) {
-              // Ouvrir la vidéo dans un nouvel onglet ou modal
-              window.open(block.data.url, '_blank');
-            }
-          };
-  
-          return (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  URL de la vidéo
-                </label>
-                <div className="flex space-x-2">
-                  <input
-                    type="text"
-                    value={block.data?.url || ''}
-                    onChange={(e) => onUpdate({ ...block, data: { ...block.data, url: e.target.value } })}
-                    placeholder="https://youtube.com/watch?v=... ou https://vimeo.com/..."
-                    className="flex-1 px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
-                  />
-                  <button 
-                    onClick={handleVideoPreview}
-                    disabled={!block.data?.url}
-                    className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
-                  >
-                    Prévisualiser
-                  </button>
-                </div>
-              </div>
-  
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Durée estimée (minutes)
-                </label>
+      case 'video':
+        const handleVideoPreview = () => {
+          if (block.data?.url) {
+            // Ouvrir la vidéo dans un nouvel onglet ou modal
+            window.open(block.data.url, '_blank');
+          }
+        };
+
+        return (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                URL de la vidéo
+              </label>
+              <div className="flex space-x-2">
                 <input
-                  type="number"
-                  value={block.data?.duration || ''}
-                  onChange={(e) => onUpdate({ ...block, data: { ...block.data, duration: parseInt(e.target.value) } })}
-                  placeholder="Ex: 15"
-                  className="w-32 px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
+                  type="text"
+                  value={block.data?.url || ''}
+                  onChange={(e) => onUpdate({ ...block, data: { ...block.data, url: e.target.value } })}
+                  placeholder="https://youtube.com/watch?v=... ou https://vimeo.com/..."
+                  className="flex-1 px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
                 />
+                <button
+                  onClick={handleVideoPreview}
+                  disabled={!block.data?.url}
+                  className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+                >
+                  Prévisualiser
+                </button>
               </div>
-  
-              {block.data?.url && (
-                <div className="aspect-video bg-gray-900 rounded-lg overflow-hidden">
-                  {(block.data.url.includes('youtube.com') || block.data.url.includes('youtu.be')) ? (
-                    <iframe
-                      src={`https://www.youtube.com/embed/${extractYouTubeId(block.data.url)}`}
-                      className="w-full h-full"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    />
-                  ) : block.data.url.includes('vimeo.com') ? (
-                    <iframe
-                      src={`https://player.vimeo.com/video/${extractVimeoId(block.data.url)}`}
-                      className="w-full h-full"
-                      allow="autoplay; fullscreen; picture-in-picture"
-                      allowFullScreen
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-full">
-                      <PlayCircle className="w-16 h-16 text-white opacity-80" />
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
-          );
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Durée estimée (minutes)
+              </label>
+              <input
+                type="number"
+                value={block.data?.duration || ''}
+                onChange={(e) => onUpdate({ ...block, data: { ...block.data, duration: parseInt(e.target.value) } })}
+                placeholder="Ex: 15"
+                className="w-32 px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
+              />
+            </div>
+
+            {block.data?.url && (
+              <div className="aspect-video bg-gray-900 rounded-lg overflow-hidden">
+                {(block.data.url.includes('youtube.com') || block.data.url.includes('youtu.be')) ? (
+                  <iframe
+                    src={`https://www.youtube.com/embed/${extractYouTubeId(block.data.url)}`}
+                    className="w-full h-full"
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : block.data.url.includes('vimeo.com') ? (
+                  <iframe
+                    src={`https://player.vimeo.com/video/${extractVimeoId(block.data.url)}`}
+                    className="w-full h-full"
+                    allow="autoplay; fullscreen; picture-in-picture"
+                    allowFullScreen
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-full">
+                    <PlayCircle className="w-16 h-16 text-white opacity-80" />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
 
       case 'image':
         const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -145,63 +148,86 @@ export const ContentBlockEditor = ({
           }
         };
 
+        const handleMediaSelect = (media: any) => {
+          onUpdate({
+            ...block,
+            data: {
+              ...block.data,
+              url: media.url,
+              thumbnail: media.thumbnail,
+              medium: media.medium || media.url,
+              alt: media.alt || '',
+              filename: media.filename
+            }
+          });
+        };
+
         return (
           <div className="space-y-4">
-            <div className="relative">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleImageUpload}
-                disabled={isUploading}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-              />
-              <div className={`border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-[#7978E2] transition-colors bg-gray-50 ${isUploading ? 'opacity-50' : ''}`}>
-                {isUploading ? (
-                  <div className="flex flex-col items-center">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#7978E2] mb-4"></div>
-                    <p className="text-sm text-gray-600">Upload en cours...</p>
-                  </div>
-                ) : block.data?.url ? (
-                  <div className="relative">
-                    <img
-                      src={getMediaUrl(block.data.url)}
-                      alt={block.data.alt || ''}
-                      className="max-w-full h-auto mx-auto rounded-lg"
-                      onError={(e) => {
-                        console.error('Erreur chargement image:', block.data.url);
-                        e.currentTarget.src = '/placeholder-image.png';
-                      }}
-                    />
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onUpdate({
-                          ...block,
-                          data: {
-                            ...block.data,
-                            url: '',
-                            thumbnail: '',
-                            medium: ''
-                          }
-                        });
-                      }}
-                      className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                    <p className="text-sm text-gray-600 mb-2">
-                      Glissez-déposez une image ou cliquez pour parcourir
-                    </p>
-                    <p className="text-xs text-gray-500">PNG, JPG, GIF, WebP jusqu'à 10MB</p>
-                  </>
-                )}
+            {/* Boutons d'action */}
+            <div className="flex space-x-3">
+              <button
+                onClick={() => setShowMediaGallery(true)}
+                className="flex-1 px-4 py-2 bg-gradient-to-r from-[#7978E2] to-[#42B4B7] text-white rounded-lg hover:shadow-lg transition-all"
+              >
+                <Image className="w-4 h-4 inline-block mr-2" />
+                Choisir depuis la bibliothèque
+              </button>
+
+              <div className="relative flex-1">
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  disabled={isUploading}
+                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                />
+                <button className="w-full px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
+                  <Upload className="w-4 h-4 inline-block mr-2" />
+                  Uploader une nouvelle image
+                </button>
               </div>
             </div>
 
+            {/* Affichage de l'image sélectionnée */}
+            {block.data?.url && (
+              <div className="relative rounded-lg overflow-hidden border border-gray-200">
+                <img
+                  src={getMediaUrl(block.data.url)}
+                  alt={block.data.alt || ''}
+                  className="w-full h-auto"
+                  onError={(e) => {
+                    console.error('Erreur chargement image:', block.data.url);
+                    e.currentTarget.src = '/placeholder-image.png';
+                  }}
+                />
+                <button
+                  onClick={() => {
+                    onUpdate({
+                      ...block,
+                      data: {
+                        ...block.data,
+                        url: '',
+                        thumbnail: '',
+                        medium: ''
+                      }
+                    });
+                  }}
+                  className="absolute top-2 right-2 p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+
+                {/* Badge avec le nom du fichier */}
+                {block.data.filename && (
+                  <div className="absolute bottom-2 left-2 px-3 py-1 bg-black/70 text-white text-xs rounded">
+                    {block.data.filename}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Champs alt et caption */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -229,6 +255,14 @@ export const ContentBlockEditor = ({
                 />
               </div>
             </div>
+
+            <MediaGallery
+              isOpen={showMediaGallery}
+              onClose={() => setShowMediaGallery(false)}
+              onSelect={handleMediaSelect}
+              type="image"
+            />
+
           </div>
         );
 
@@ -317,7 +351,7 @@ export const ContentBlockEditor = ({
           </div>
         );
 
-        case 'download':
+      case 'download':
         const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
           const file = e.target.files?.[0];
           if (!file) return;
@@ -528,14 +562,31 @@ export const ContentBlockEditor = ({
           ${isOver ? 'border-[#7978E2] border-2' : 'border-gray-200'}
           ${isDeleting ? 'opacity-0 scale-95' : ''}
         `}
-      draggable
+      draggable={isDraggable} // <- plus "toujours draggable"
+      onDragStart={(e) => {
+        // Ne pas démarrer un drag si on part de l'éditeur de texte
+        if ((e.target as HTMLElement).closest('[data-rte]')) {
+          e.preventDefault();
+          return;
+        }
+        setIsDraggable(true); // Enable dragging
+      }}
+      onDragEnd={() => setIsDraggable(false)}
     >
       {/* Header du bloc */}
       <div className="bg-gray-50 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center space-x-3">
-          <div className="cursor-move hover:bg-gray-200 p-1 rounded transition-colors">
+          {/* POIGNÉE DE DRAG SEULEMENT */}
+          <button
+            type="button"
+            className="cursor-grab active:cursor-grabbing hover:bg-gray-200 p-1 rounded transition-colors"
+            onMouseDown={() => setIsDraggable(true)}
+            onMouseUp={() => setIsDraggable(false)}
+            onBlur={() => setIsDraggable(false)}
+            title="Glisser pour réordonner"
+          >
             <GripVertical className="w-5 h-5 text-gray-400" />
-          </div>
+          </button>
           <div className={`p-1.5 rounded ${blockType.color}`}>
             <blockType.icon className="w-4 h-4 text-white" />
           </div>

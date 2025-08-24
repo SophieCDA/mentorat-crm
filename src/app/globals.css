@@ -1115,4 +1115,9 @@
       background-position: 70% 30%, 30% 70%, 20% 80%;
     }
   }
+
+  [contenteditable][data-rte] {
+    -webkit-user-drag: none;
+    user-select: text;
+  }
 }
