@@ -1,417 +1,35 @@
-import React, { useState, useEffect, useRef } from 'react';
+
+
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Save, ArrowLeft, Plus, MoreVertical, GripVertical, Trash2, Eye, 
   Type, Image, Video, HelpCircle, Download, Code, List, CheckSquare,
   ChevronDown, ChevronRight, Settings, Copy, Move, X, Upload,
   Bold, Italic, Underline, Link, AlignLeft, AlignCenter, AlignRight,
   Palette, Clock, Star, Lock, Unlock, BookOpen, FileText, PlayCircle,
-  Layers, Grid, AlertCircle, Check
+  Layers, Grid, AlertCircle, Check, Loader2, RefreshCw, AlertTriangle,
+  Archive, Send
 } from 'lucide-react';
-import { Formation, Module, Chapter, ContentBlock, ContentType } from '@/types/formation.types';
+
+// Import des types depuis le fichier de types
+import { 
+  Formation, 
+  Module, 
+  Chapter, 
+  ContentBlock, 
+  ContentType,
+  FormationStatus,
+  FormationNiveau
+} from '@/types/formation.types';
+
 import { formationsAPI } from '@/lib/services/formation.service';
 
-// Types pour les blocs de contenu
-interface BlockType {
-  type: ContentType;
-  icon: React.ComponentType<any>;
-  label: string;
-  color: string;
-  description: string;
-}
+import { useAutoSave, useDragAndDrop } from '@/hooks/useEditor';
+import { Toast } from '@/components/formations/editor/Toast';
+import { ContentBlockEditor } from './editor/ContentBlockEditor';
+import { blockTypesConfig } from '@/types/editor.types';
 
-const blockTypes: { [key: string]: BlockType } = {
-  text: { 
-    type: 'text', 
-    icon: Type, 
-    label: 'Texte', 
-    color: 'bg-blue-500',
-    description: 'Paragraphe, titre ou liste'
-  },
-  video: { 
-    type: 'video', 
-    icon: Video, 
-    label: 'Vidéo', 
-    color: 'bg-red-500',
-    description: 'YouTube, Vimeo ou upload'
-  },
-  image: { 
-    type: 'image', 
-    icon: Image, 
-    label: 'Image', 
-    color: 'bg-green-500',
-    description: 'Image ou galerie'
-  },
-  quiz: { 
-    type: 'quiz', 
-    icon: HelpCircle, 
-    label: 'Quiz', 
-    color: 'bg-purple-500',
-    description: 'Questions à choix multiples'
-  },
-  download: { 
-    type: 'download', 
-    icon: Download, 
-    label: 'Fichier', 
-    color: 'bg-yellow-500',
-    description: 'PDF, ZIP ou autres'
-  },
-  exercise: { 
-    type: 'exercise', 
-    icon: CheckSquare, 
-    label: 'Exercice', 
-    color: 'bg-indigo-500',
-    description: 'Travail pratique'
-  }
-};
-
-// Composant pour l'éditeur de texte riche
-const RichTextEditor = ({ content, onChange }: { content: string; onChange: (content: string) => void }) => {
-  const [isBold, setIsBold] = useState(false);
-  const [isItalic, setIsItalic] = useState(false);
-  const [isUnderline, setIsUnderline] = useState(false);
-  const editorRef = useRef<HTMLDivElement>(null);
-
-  const execCommand = (command: string, value?: string) => {
-    document.execCommand(command, false, value);
-    if (editorRef.current) {
-      onChange(editorRef.current.innerHTML);
-    }
-  };
-
-  return (
-    <div className="border border-gray-200 rounded-lg overflow-hidden">
-      <div className="bg-gray-50 border-b border-gray-200 px-4 py-2 flex items-center space-x-2">
-        <button
-          onClick={() => execCommand('bold')}
-          className={`p-2 rounded hover:bg-gray-200 transition-colors ${isBold ? 'bg-gray-200' : ''}`}
-        >
-          <Bold className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => execCommand('italic')}
-          className={`p-2 rounded hover:bg-gray-200 transition-colors ${isItalic ? 'bg-gray-200' : ''}`}
-        >
-          <Italic className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => execCommand('underline')}
-          className={`p-2 rounded hover:bg-gray-200 transition-colors ${isUnderline ? 'bg-gray-200' : ''}`}
-        >
-          <Underline className="w-4 h-4" />
-        </button>
-        <div className="w-px h-6 bg-gray-300" />
-        <button
-          onClick={() => execCommand('justifyLeft')}
-          className="p-2 rounded hover:bg-gray-200 transition-colors"
-        >
-          <AlignLeft className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => execCommand('justifyCenter')}
-          className="p-2 rounded hover:bg-gray-200 transition-colors"
-        >
-          <AlignCenter className="w-4 h-4" />
-        </button>
-        <button
-          onClick={() => execCommand('justifyRight')}
-          className="p-2 rounded hover:bg-gray-200 transition-colors"
-        >
-          <AlignRight className="w-4 h-4" />
-        </button>
-        <div className="w-px h-6 bg-gray-300" />
-        <button
-          onClick={() => {
-            const url = prompt('Entrez l\'URL du lien:');
-            if (url) execCommand('createLink', url);
-          }}
-          className="p-2 rounded hover:bg-gray-200 transition-colors"
-        >
-          <Link className="w-4 h-4" />
-        </button>
-      </div>
-      <div
-        ref={editorRef}
-        contentEditable
-        className="p-4 min-h-[200px] focus:outline-none"
-        dangerouslySetInnerHTML={{ __html: content }}
-        onInput={(e) => onChange(e.currentTarget.innerHTML)}
-      />
-    </div>
-  );
-};
-
-// Composant pour un bloc de contenu
-const ContentBlockEditor = ({ 
-  block, 
-  onUpdate, 
-  onDelete, 
-  onDuplicate,
-  onMoveUp,
-  onMoveDown,
-  canMoveUp,
-  canMoveDown 
-}: {
-  block: ContentBlock;
-  onUpdate: (block: ContentBlock) => void;
-  onDelete: () => void;
-  onDuplicate: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
-}) => {
-  const [isExpanded, setIsExpanded] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
-  const blockType = blockTypes[block.type];
-
-  const renderBlockContent = () => {
-    switch (block.type) {
-      case 'text':
-        return (
-          <RichTextEditor
-            content={block.data?.content || ''}
-            onChange={(content) => onUpdate({ ...block, data: { ...block.data, content } })}
-          />
-        );
-      
-      case 'video':
-        return (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">URL de la vidéo</label>
-              <input
-                type="text"
-                value={block.data?.url || ''}
-                onChange={(e) => onUpdate({ ...block, data: { ...block.data, url: e.target.value } })}
-                placeholder="https://youtube.com/watch?v=..."
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
-              />
-            </div>
-            {block.data?.url && (
-              <div className="aspect-video bg-gray-100 rounded-lg flex items-center justify-center">
-                <PlayCircle className="w-12 h-12 text-gray-400" />
-              </div>
-            )}
-          </div>
-        );
-      
-      case 'image':
-        return (
-          <div className="space-y-4">
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors cursor-pointer">
-              <Image className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-sm text-gray-600 mb-2">Cliquez pour uploader une image</p>
-              <p className="text-xs text-gray-500">PNG, JPG, GIF jusqu'à 10MB</p>
-            </div>
-            <input
-              type="text"
-              value={block.data?.alt || ''}
-              onChange={(e) => onUpdate({ ...block, data: { ...block.data, alt: e.target.value } })}
-              placeholder="Texte alternatif (SEO)"
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
-            />
-          </div>
-        );
-      
-      case 'quiz':
-        return (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Question</label>
-              <input
-                type="text"
-                value={block.data?.question || ''}
-                onChange={(e) => onUpdate({ ...block, data: { ...block.data, question: e.target.value } })}
-                placeholder="Quelle est votre question ?"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Réponses</label>
-              <div className="space-y-2">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i} className="flex items-center space-x-2">
-                    <input
-                      type="radio"
-                      name={`correct-${block.id}`}
-                      className="text-[#7978E2] focus:ring-[#7978E2]"
-                    />
-                    <input
-                      type="text"
-                      placeholder={`Réponse ${i}`}
-                      className="flex-1 px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        );
-      
-      case 'download':
-        return (
-          <div className="space-y-4">
-            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors cursor-pointer">
-              <Download className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-sm text-gray-600 mb-2">Cliquez pour uploader un fichier</p>
-              <p className="text-xs text-gray-500">PDF, ZIP, DOC jusqu'à 50MB</p>
-            </div>
-            <input
-              type="text"
-              value={block.data?.title || ''}
-              onChange={(e) => onUpdate({ ...block, data: { ...block.data, title: e.target.value } })}
-              placeholder="Titre du fichier"
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
-            />
-          </div>
-        );
-      
-      case 'exercise':
-        return (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Instructions</label>
-              <textarea
-                value={block.data?.instructions || ''}
-                onChange={(e) => onUpdate({ ...block, data: { ...block.data, instructions: e.target.value } })}
-                placeholder="Décrivez l'exercice à réaliser..."
-                rows={4}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
-              />
-            </div>
-            <div className="flex items-center space-x-4">
-              <label className="flex items-center">
-                <input
-                  type="checkbox"
-                  checked={block.obligatoire}
-                  onChange={(e) => onUpdate({ ...block, obligatoire: e.target.checked })}
-                  className="rounded border-gray-300 text-[#7978E2] focus:ring-[#7978E2] mr-2"
-                />
-                <span className="text-sm text-gray-700">Obligatoire pour continuer</span>
-              </label>
-            </div>
-          </div>
-        );
-      
-      default:
-        return null;
-    }
-  };
-
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden group">
-      {/* Header du bloc */}
-      <div className="bg-gray-50 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <button className="cursor-move">
-            <GripVertical className="w-5 h-5 text-gray-400" />
-          </button>
-          <div className={`p-1.5 rounded ${blockType.color}`}>
-            <blockType.icon className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <p className="font-medium text-gray-900">{block.titre || blockType.label}</p>
-            <p className="text-xs text-gray-500">{blockType.description}</p>
-          </div>
-        </div>
-        
-        <div className="flex items-center space-x-2">
-          {block.obligatoire && (
-            <span className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded-full">
-              Obligatoire
-            </span>
-          )}
-          
-          <button
-            onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1.5 hover:bg-gray-200 rounded transition-colors"
-          >
-            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-          </button>
-          
-          <div className="relative">
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="p-1.5 hover:bg-gray-200 rounded transition-colors"
-            >
-              <MoreVertical className="w-4 h-4" />
-            </button>
-            
-            {showSettings && (
-              <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-lg shadow-lg py-2 w-48 z-10">
-                <button
-                  onClick={() => {
-                    onMoveUp();
-                    setShowSettings(false);
-                  }}
-                  disabled={!canMoveUp}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                >
-                  <Move className="w-4 h-4 mr-2" />
-                  Monter
-                </button>
-                <button
-                  onClick={() => {
-                    onMoveDown();
-                    setShowSettings(false);
-                  }}
-                  disabled={!canMoveDown}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
-                >
-                  <Move className="w-4 h-4 mr-2 rotate-180" />
-                  Descendre
-                </button>
-                <button
-                  onClick={() => {
-                    onDuplicate();
-                    setShowSettings(false);
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 flex items-center"
-                >
-                  <Copy className="w-4 h-4 mr-2" />
-                  Dupliquer
-                </button>
-                <div className="border-t border-gray-200 my-2" />
-                <button
-                  onClick={() => {
-                    onDelete();
-                    setShowSettings(false);
-                  }}
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-red-50 text-red-600 flex items-center"
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  Supprimer
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      
-      {/* Contenu du bloc */}
-      {isExpanded && (
-        <div className="p-4">
-          {/* Titre du bloc */}
-          <div className="mb-4">
-            <input
-              type="text"
-              value={block.titre}
-              onChange={(e) => onUpdate({ ...block, titre: e.target.value })}
-              placeholder="Titre du bloc (optionnel)"
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#7978E2]"
-            />
-          </div>
-          
-          {/* Contenu spécifique au type */}
-          {renderBlockContent()}
-        </div>
-      )}
-    </div>
-  );
-};
-
-// Composant principal de l'éditeur
-export default function FormationEditor({ formationId }: { formationId?: string }) {
+export default function FormationEditor({ formationId }: { formationId?: string | number }) {
   const [formation, setFormation] = useState<Formation>({
     titre: '',
     description: '',
@@ -428,23 +46,31 @@ export default function FormationEditor({ formationId }: { formationId?: string 
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
-  // Charger la formation si ID fourni
+  // Charger la formation si ID fourni, sinon créer une nouvelle
   useEffect(() => {
     if (formationId) {
       loadFormation();
     } else {
-      // Créer une formation vide avec un module et un chapitre par défaut
+      // Créer une formation vide avec un module et chapitre par défaut
       setFormation({
-        ...formation,
+        titre: '',
+        description: '',
+        prix: 0,
+        duree_estimee: 0,
+        niveau: 'debutant',
+        statut: 'brouillon',
         modules: [{
-          id: '1',
-          titre: 'Module 1',
+          id: Date.now(),
+          titre: 'Introduction',
           description: '',
           ordre: 1,
           chapitres: [{
-            id: '1',
-            titre: 'Chapitre 1',
+            id: Date.now() + 1,
+            titre: 'Bienvenue',
             description: '',
             ordre: 1,
             contenu: []
@@ -454,45 +80,218 @@ export default function FormationEditor({ formationId }: { formationId?: string 
     }
   }, [formationId]);
 
+  // Fonction pour charger une formation existante
   const loadFormation = async () => {
     if (!formationId) return;
-    const data = await formationsAPI.getById(formationId);
-    if (data) {
-      setFormation(data);
+    
+    setIsLoading(true);
+    try {
+      const data = await formationsAPI.getById(formationId);
+      
+      if (data) {
+        setFormation(data);
+        setToast({ message: 'Formation chargée avec succès', type: 'success' });
+      } else {
+        throw new Error('Formation non trouvée');
+      }
+    } catch (error) {
+      console.error('Erreur lors du chargement:', error);
+      setToast({ message: 'Erreur lors du chargement de la formation', type: 'error' });
+      
+      // Redirection vers la liste des formations après 2 secondes
+      setTimeout(() => {
+        window.location.href = '/dashboard/formations';
+      }, 2000);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Sauvegarder automatiquement toutes les 30 secondes
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (formation.titre) {
-        handleSave();
-      }
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [formation]);
+  // Auto-save hook
+  const handleSave = useCallback(async () => {
+    // Validation minimale
+    if (!formation.titre.trim()) {
+      setToast({ message: 'Le titre est requis', type: 'warning' });
+      return;
+    }
 
-  const handleSave = async () => {
     setIsSaving(true);
     try {
-      if (formationId) {
-        await formationsAPI.update(formationId, formation);
+      let savedFormation;
+      
+      if (formation.id || formationId) {
+        // Mise à jour d'une formation existante
+        const id = formation.id || formationId;
+        savedFormation = await formationsAPI.update(id!, formation);
+        
+        if (savedFormation) {
+          setFormation(savedFormation);
+          setToast({ message: 'Formation mise à jour avec succès', type: 'success' });
+        } else {
+          throw new Error('Erreur lors de la mise à jour');
+        }
       } else {
-        const newFormation = await formationsAPI.create(formation);
-        if (newFormation?.id) {
-          window.history.replaceState({}, '', `/dashboard/formations/${newFormation.id}/edit`);
+        // Création d'une nouvelle formation
+        savedFormation = await formationsAPI.create(formation);
+        
+        if (savedFormation && savedFormation.id) {
+          setFormation(savedFormation);
+          // Mettre à jour l'URL sans recharger la page
+          window.history.replaceState({}, '', `/dashboard/formations/${savedFormation.id}/edit`);
+          setToast({ message: 'Formation créée avec succès', type: 'success' });
+        } else {
+          throw new Error('Erreur lors de la création');
         }
       }
+      
       setLastSaved(new Date());
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
+      setToast({ message: 'Erreur lors de la sauvegarde. Veuillez réessayer.', type: 'error' });
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [formation, formationId]);
+
+  const { triggerAutoSave, hasChanges } = useAutoSave(formation, handleSave, 500000);
+
+  // Déclencher l'auto-save à chaque modification
+  useEffect(() => {
+    if (formation.titre) {
+      triggerAutoSave();
+    }
+  }, [formation, triggerAutoSave]);
+
+  // Validation de la formation
+  const validateFormation = useCallback((): boolean => {
+    const newErrors: string[] = [];
+    
+    if (!formation.titre) newErrors.push('Le titre est requis');
+    if (!formation.description) newErrors.push('La description est requise');
+    if (formation.prix < 0) newErrors.push('Le prix doit être positif');
+    if (formation.modules.length === 0) newErrors.push('Au moins un module est requis');
+    
+    formation.modules.forEach((module, mIndex) => {
+      if (!module.titre) newErrors.push(`Le titre du module ${mIndex + 1} est requis`);
+      if (module.chapitres.length === 0) newErrors.push(`Le module ${mIndex + 1} doit avoir au moins un chapitre`);
+      
+      module.chapitres.forEach((chapter, cIndex) => {
+        if (!chapter.titre) newErrors.push(`Le titre du chapitre ${cIndex + 1} du module ${mIndex + 1} est requis`);
+      });
+    });
+    
+    setErrors(newErrors);
+    return newErrors.length === 0;
+  }, [formation]);
+
+  // Publier la formation
+  const handlePublish = useCallback(async () => {
+    if (validateFormation()) {
+      if (!formation.id && !formationId) {
+        setToast({ message: 'Veuillez d\'abord sauvegarder la formation', type: 'warning' });
+        return;
+      }
+
+      setIsSaving(true);
+      try {
+        const id = formation.id || formationId;
+        const success = await formationsAPI.publish(id!);
+        
+        if (success) {
+          setFormation({ ...formation, statut: 'active' });
+          setToast({ message: 'Formation publiée avec succès', type: 'success' });
+        } else {
+          throw new Error('Erreur lors de la publication');
+        }
+      } catch (error) {
+        console.error('Erreur lors de la publication:', error);
+        setToast({ message: 'Erreur lors de la publication', type: 'error' });
+      } finally {
+        setIsSaving(false);
+      }
+    } else {
+      setToast({ message: 'Veuillez corriger les erreurs avant de publier', type: 'warning' });
+    }
+  }, [formation, formationId, validateFormation]);
+
+  // Archiver la formation
+  const handleArchive = useCallback(async () => {
+    if (!formation.id && !formationId) {
+      setToast({ message: 'Veuillez d\'abord sauvegarder la formation', type: 'warning' });
+      return;
+    }
+
+    if (confirm('Êtes-vous sûr de vouloir archiver cette formation ?')) {
+      setIsSaving(true);
+      try {
+        const id = formation.id || formationId;
+        const success = await formationsAPI.archive(id!);
+        
+        if (success) {
+          setFormation({ ...formation, statut: 'archivee' });
+          setToast({ message: 'Formation archivée avec succès', type: 'success' });
+        } else {
+          throw new Error('Erreur lors de l\'archivage');
+        }
+      } catch (error) {
+        console.error('Erreur lors de l\'archivage:', error);
+        setToast({ message: 'Erreur lors de l\'archivage', type: 'error' });
+      } finally {
+        setIsSaving(false);
+      }
+    }
+  }, [formation, formationId]);
+
+  // Supprimer la formation
+  const handleDelete = useCallback(async () => {
+    if (!formation.id && !formationId) {
+      // Si pas encore sauvegardée, juste rediriger
+      window.location.href = '/dashboard/formations';
+      return;
+    }
+
+    if (confirm('Êtes-vous sûr de vouloir supprimer cette formation ? Cette action est irréversible.')) {
+      setIsSaving(true);
+      try {
+        const id = formation.id || formationId;
+        const success = await formationsAPI.delete(id!);
+        
+        if (success) {
+          setToast({ message: 'Formation supprimée avec succès', type: 'success' });
+          // Redirection après suppression
+          setTimeout(() => {
+            window.location.href = '/dashboard/formations';
+          }, 1000);
+        } else {
+          throw new Error('Erreur lors de la suppression');
+        }
+      } catch (error) {
+        console.error('Erreur lors de la suppression:', error);
+        setToast({ message: 'Erreur lors de la suppression', type: 'error' });
+      } finally {
+        setIsSaving(false);
+      }
+    }
+  }, [formation, formationId]);
 
   const currentModule = formation.modules[selectedModule];
   const currentChapter = currentModule?.chapitres[selectedChapter];
+
+  // Drag & Drop pour les blocs
+  const {
+    draggedItem,
+    dragOverItem,
+    handleDragStart,
+    handleDragOver,
+    handleDrop
+  } = useDragAndDrop(
+    currentChapter?.contenu || [],
+    (reorderedBlocks) => {
+      const updatedModules = [...formation.modules];
+      updatedModules[selectedModule].chapitres[selectedChapter].contenu = reorderedBlocks;
+      setFormation({ ...formation, modules: updatedModules });
+    }
+  );
 
   // Gestion des modules
   const addModule = () => {
@@ -503,7 +302,7 @@ export default function FormationEditor({ formationId }: { formationId?: string 
       ordre: formation.modules.length + 1,
       chapitres: [{
         id: Date.now().toString(),
-        titre: 'Chapitre 1',
+        titre: 'Nouveau chapitre',
         description: '',
         ordre: 1,
         contenu: []
@@ -532,8 +331,8 @@ export default function FormationEditor({ formationId }: { formationId?: string 
     setSelectedChapter(currentModule.chapitres.length);
   };
 
-  // Gestion des blocs de contenu
-  const addContentBlock = (type: ContentType) => {
+  // Gestion des blocs
+  const addContentBlock = (type: ContentBlock['type']) => {
     if (!currentChapter) return;
     
     const newBlock: ContentBlock = {
@@ -550,6 +349,7 @@ export default function FormationEditor({ formationId }: { formationId?: string 
     updatedModules[selectedModule].chapitres[selectedChapter].contenu.push(newBlock);
     setFormation({ ...formation, modules: updatedModules });
     setShowBlockSelector(false);
+    setToast({ message: 'Bloc ajouté', type: 'success' });
   };
 
   const updateContentBlock = (blockIndex: number, updatedBlock: ContentBlock) => {
@@ -562,63 +362,104 @@ export default function FormationEditor({ formationId }: { formationId?: string 
     const updatedModules = [...formation.modules];
     updatedModules[selectedModule].chapitres[selectedChapter].contenu.splice(blockIndex, 1);
     setFormation({ ...formation, modules: updatedModules });
+    setToast({ message: 'Bloc supprimé', type: 'success' });
   };
 
   const duplicateContentBlock = (blockIndex: number) => {
     const block = currentChapter?.contenu[blockIndex];
     if (!block) return;
     
-    const newBlock = { ...block, id: Date.now().toString() };
+    const newBlock = { 
+      ...block, 
+      id: Date.now(),
+      titre: `${block.titre} (copie)`
+    };
     const updatedModules = [...formation.modules];
     updatedModules[selectedModule].chapitres[selectedChapter].contenu.splice(blockIndex + 1, 0, newBlock);
     setFormation({ ...formation, modules: updatedModules });
+    setToast({ message: 'Bloc dupliqué', type: 'success' });
   };
 
-  const moveContentBlock = (blockIndex: number, direction: 'up' | 'down') => {
-    const updatedModules = [...formation.modules];
-    const content = updatedModules[selectedModule].chapitres[selectedChapter].contenu;
-    const newIndex = direction === 'up' ? blockIndex - 1 : blockIndex + 1;
-    
-    if (newIndex >= 0 && newIndex < content.length) {
-      [content[blockIndex], content[newIndex]] = [content[newIndex], content[blockIndex]];
-      setFormation({ ...formation, modules: updatedModules });
+  // Calculer la durée totale
+  const totalDuration = useMemo(() => {
+    let duration = 0;
+    formation.modules.forEach(module => {
+      module.chapitres.forEach(chapter => {
+        chapter.contenu.forEach(block => {
+          if (block.type === 'video' && block.data?.duration) {
+            duration += block.data.duration;
+          } else if (block.type === 'exercise' && block.data?.estimatedTime) {
+            duration += block.data.estimatedTime;
+          }
+        });
+      });
+    });
+    return Math.round(duration / 60); // Convertir en heures
+  }, [formation]);
+
+  // Mettre à jour automatiquement la durée estimée
+  useEffect(() => {
+    if (totalDuration > 0) {
+      setFormation(prev => ({ ...prev, duree_estimee: totalDuration }));
     }
-  };
+  }, [totalDuration]);
+
+  const blockTypes: ContentType[] = ['text', 'video', 'image', 'quiz', 'download', 'exercise'];
+
+  // Afficher un loader pendant le chargement
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-[#7978E2] animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Chargement de la formation...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar gauche - Structure */}
+      {/* Sidebar */}
       <div className="w-80 bg-white border-r border-gray-200 flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200">
           <div className="flex items-center justify-between mb-4">
-            <button
+            <button 
               onClick={() => window.location.href = '/dashboard/formations'}
               className="flex items-center text-gray-600 hover:text-gray-900 transition-colors"
             >
               <ArrowLeft className="w-5 h-5 mr-2" />
               Retour
             </button>
-            <button
-              onClick={handleSave}
-              disabled={isSaving}
-              className="flex items-center px-3 py-1.5 bg-gradient-to-r from-[#F22E77] to-[#7978E2] text-white rounded-lg hover:shadow-lg transition-all disabled:opacity-50"
-            >
-              {isSaving ? (
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <>
-                  <Save className="w-4 h-4 mr-1.5" />
-                  Enregistrer
-                </>
+            <div className="flex items-center space-x-2">
+              {hasChanges && !isSaving && (
+                <span className="text-xs text-yellow-600 flex items-center">
+                  <AlertCircle className="w-3 h-3 mr-1" />
+                  Non sauvegardé
+                </span>
               )}
-            </button>
+              <button
+                onClick={handleSave}
+                disabled={isSaving || !formation.titre}
+                className="flex items-center px-3 py-1.5 bg-gradient-to-r from-[#F22E77] to-[#7978E2] text-white rounded-lg hover:shadow-lg transition-all disabled:opacity-50"
+              >
+                {isSaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-1.5" />
+                    {formationId ? 'Mettre à jour' : 'Sauvegarder'}
+                  </>
+                )}
+              </button>
+            </div>
           </div>
           
           {lastSaved && (
             <p className="text-xs text-gray-500 flex items-center">
               <Check className="w-3 h-3 mr-1 text-green-500" />
-              Sauvegardé à {lastSaved.toLocaleTimeString()}
+              {formationId ? 'Mis à jour' : 'Sauvegardé'} à {lastSaved.toLocaleTimeString()}
             </p>
           )}
         </div>
@@ -647,7 +488,7 @@ export default function FormationEditor({ formationId }: { formationId?: string 
                 <input
                   type="number"
                   value={formation.prix}
-                  onChange={(e) => setFormation({ ...formation, prix: parseFloat(e.target.value) })}
+                  onChange={(e) => setFormation({ ...formation, prix: parseFloat(e.target.value) || 0 })}
                   className="w-full text-sm font-medium bg-transparent border-0 focus:outline-none focus:ring-0"
                 />
                 <span className="text-sm text-gray-500">€</span>
@@ -659,7 +500,7 @@ export default function FormationEditor({ formationId }: { formationId?: string 
                 <input
                   type="number"
                   value={formation.duree_estimee}
-                  onChange={(e) => setFormation({ ...formation, duree_estimee: parseFloat(e.target.value) })}
+                  onChange={(e) => setFormation({ ...formation, duree_estimee: parseFloat(e.target.value) || 0 })}
                   className="w-full text-sm font-medium bg-transparent border-0 focus:outline-none focus:ring-0"
                 />
                 <span className="text-sm text-gray-500">h</span>
@@ -667,21 +508,36 @@ export default function FormationEditor({ formationId }: { formationId?: string 
             </div>
           </div>
           
-          <div className="mt-3">
-            <label className="text-xs text-gray-500">Niveau</label>
-            <select
-              value={formation.niveau}
-              onChange={(e) => setFormation({ ...formation, niveau: e.target.value as any })}
-              className="w-full text-sm bg-transparent border-0 focus:outline-none focus:ring-0"
-            >
-              <option value="debutant">Débutant</option>
-              <option value="intermediaire">Intermédiaire</option>
-              <option value="avance">Avancé</option>
-            </select>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500">Niveau</label>
+              <select
+                value={formation.niveau}
+                onChange={(e) => setFormation({ ...formation, niveau: e.target.value as any })}
+                className="w-full text-sm bg-transparent border-0 focus:outline-none focus:ring-0"
+              >
+                <option value="debutant">Débutant</option>
+                <option value="intermediaire">Intermédiaire</option>
+                <option value="avance">Avancé</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500">Statut</label>
+              <div className="flex items-center">
+                <div className={`w-2 h-2 rounded-full mr-2 ${
+                  formation.statut === 'active' ? 'bg-green-500' : 
+                  formation.statut === 'archivee' ? 'bg-yellow-500' : 'bg-gray-400'
+                }`} />
+                <span className="text-sm capitalize">{
+                  formation.statut === 'active' ? 'Active' :
+                  formation.statut === 'archivee' ? 'Archivée' : 'Brouillon'
+                }</span>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Structure de la formation */}
+        {/* Structure */}
         <div className="flex-1 overflow-y-auto">
           <div className="px-6 py-4">
             <div className="flex items-center justify-between mb-3">
@@ -694,14 +550,13 @@ export default function FormationEditor({ formationId }: { formationId?: string 
               </button>
             </div>
             
-            {/* Liste des modules */}
             <div className="space-y-2">
               {formation.modules.map((module, moduleIndex) => (
                 <div key={module.id} className="border border-gray-200 rounded-lg overflow-hidden">
                   <button
                     onClick={() => setSelectedModule(moduleIndex)}
                     className={`w-full px-3 py-2 text-left flex items-center justify-between hover:bg-gray-50 transition-colors ${
-                      selectedModule === moduleIndex ? 'bg-[#7978E2]/10' : ''
+                      selectedModule === moduleIndex ? 'bg-gradient-to-r from-[#7978E2]/10 to-[#42B4B7]/10' : ''
                     }`}
                   >
                     <div className="flex items-center space-x-2">
@@ -713,7 +568,6 @@ export default function FormationEditor({ formationId }: { formationId?: string 
                     }`} />
                   </button>
                   
-                  {/* Liste des chapitres */}
                   {selectedModule === moduleIndex && (
                     <div className="bg-gray-50 px-3 py-2">
                       {module.chapitres.map((chapter, chapterIndex) => (
@@ -726,6 +580,11 @@ export default function FormationEditor({ formationId }: { formationId?: string 
                         >
                           <FileText className="w-3 h-3 text-gray-400" />
                           <span className="text-sm">{chapter.titre}</span>
+                          {chapter.contenu.length > 0 && (
+                            <span className="ml-auto text-xs text-gray-500">
+                              {chapter.contenu.length}
+                            </span>
+                          )}
                         </button>
                       ))}
                       <button
@@ -741,11 +600,80 @@ export default function FormationEditor({ formationId }: { formationId?: string 
             </div>
           </div>
         </div>
+
+        {/* Actions */}
+        <div className="px-6 py-4 border-t border-gray-200 space-y-2">
+          {formation.statut === 'brouillon' && (
+            <button
+              onClick={handlePublish}
+              disabled={isSaving || !formation.titre}
+              className="w-full py-2 bg-gradient-to-r from-[#42B4B7] to-[#7978E2] text-white rounded-lg hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            >
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <Send className="w-4 h-4 mr-2" />
+                  Publier la formation
+                </>
+              )}
+            </button>
+          )}
+          
+          {formation.statut === 'active' && (
+            <button
+              onClick={handleArchive}
+              disabled={isSaving}
+              className="w-full py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            >
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <Archive className="w-4 h-4 mr-2" />
+                  Archiver la formation
+                </>
+              )}
+            </button>
+          )}
+          
+          {formation.statut === 'archivee' && (
+            <button
+              onClick={handlePublish}
+              disabled={isSaving}
+              className="w-full py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            >
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Republier la formation
+                </>
+              )}
+            </button>
+          )}
+          
+          <button
+            onClick={handleDelete}
+            disabled={isSaving}
+            className="w-full py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+          >
+            {isSaving ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <Trash2 className="w-4 h-4 mr-2" />
+                Supprimer la formation
+              </>
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* Zone principale - Éditeur de contenu */}
+      {/* Zone principale */}
       <div className="flex-1 flex flex-col">
-        {/* Header de l'éditeur */}
+        {/* Header */}
         <div className="bg-white border-b border-gray-200 px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
@@ -754,7 +682,7 @@ export default function FormationEditor({ formationId }: { formationId?: string 
               </h2>
               {currentChapter && (
                 <p className="text-sm text-gray-500 mt-1">
-                  {currentModule?.titre} • {currentChapter.contenu.length} blocs
+                  {currentModule?.titre} • {currentChapter.contenu.length} bloc{currentChapter.contenu.length > 1 ? 's' : ''}
                 </p>
               )}
             </div>
@@ -792,21 +720,41 @@ export default function FormationEditor({ formationId }: { formationId?: string 
               </button>
             </div>
             <div className="grid grid-cols-3 gap-3">
-              {Object.values(blockTypes).map((blockType) => (
-                <button
-                  key={blockType.type}
-                  onClick={() => addContentBlock(blockType.type)}
-                  className="flex items-center p-4 border border-gray-200 rounded-lg hover:border-[#7978E2] hover:bg-[#7978E2]/5 transition-all group"
-                >
-                  <div className={`p-2 rounded-lg ${blockType.color} mr-3`}>
-                    <blockType.icon className="w-5 h-5 text-white" />
-                  </div>
-                  <div className="text-left">
-                    <p className="font-medium text-gray-900">{blockType.label}</p>
-                    <p className="text-xs text-gray-500">{blockType.description}</p>
-                  </div>
-                </button>
-              ))}
+              {blockTypes.map((type) => {
+                const config = blockTypesConfig[type];
+                return (
+                  <button
+                    key={type}
+                    onClick={() => addContentBlock(type)}
+                    className="flex items-center p-4 border border-gray-200 rounded-lg hover:border-[#7978E2] hover:bg-gradient-to-r hover:from-[#7978E2]/5 hover:to-[#42B4B7]/5 transition-all group"
+                  >
+                    <div className={`p-2 rounded-lg ${config.color} mr-3`}>
+                      <config.icon className="w-5 h-5 text-white" />
+                    </div>
+                    <div className="text-left">
+                      <p className="font-medium text-gray-900">{config.label}</p>
+                      <p className="text-xs text-gray-500">{config.description}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Erreurs */}
+        {errors.length > 0 && (
+          <div className="bg-red-50 border-b border-red-200 px-8 py-4">
+            <div className="flex items-start">
+              <AlertCircle className="w-5 h-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-red-900">Veuillez corriger les erreurs suivantes :</p>
+                <ul className="mt-1 text-sm text-red-700 list-disc list-inside">
+                  {errors.map((error, index) => (
+                    <li key={index}>{error}</li>
+                  ))}
+                </ul>
+              </div>
             </div>
           </div>
         )}
@@ -843,7 +791,7 @@ export default function FormationEditor({ formationId }: { formationId?: string 
 
               {/* Blocs de contenu */}
               {currentChapter.contenu.length === 0 ? (
-                <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                <div className="text-center py-12 bg-gradient-to-br from-gray-50 to-gray-100 rounded-lg border-2 border-dashed border-gray-300">
                   <Grid className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-600 mb-4">Aucun contenu pour le moment</p>
                   <button
@@ -857,17 +805,20 @@ export default function FormationEditor({ formationId }: { formationId?: string 
               ) : (
                 <div className="space-y-4">
                   {currentChapter.contenu.map((block, index) => (
-                    <ContentBlockEditor
+                    <div
                       key={block.id}
-                      block={block}
-                      onUpdate={(updatedBlock) => updateContentBlock(index, updatedBlock)}
-                      onDelete={() => deleteContentBlock(index)}
-                      onDuplicate={() => duplicateContentBlock(index)}
-                      onMoveUp={() => moveContentBlock(index, 'up')}
-                      onMoveDown={() => moveContentBlock(index, 'down')}
-                      canMoveUp={index > 0}
-                      canMoveDown={index < currentChapter.contenu.length - 1}
-                    />
+                      onDragOver={(e) => handleDragOver(e, index)}
+                      onDrop={(e) => handleDrop(e, index)}
+                    >
+                      <ContentBlockEditor
+                        block={block}
+                        onUpdate={(updatedBlock) => updateContentBlock(index, updatedBlock)}
+                        onDelete={() => deleteContentBlock(index)}
+                        onDuplicate={() => duplicateContentBlock(index)}
+                        isDragging={draggedItem === index}
+                        isOver={dragOverItem === index}
+                      />
+                    </div>
                   ))}
                 </div>
               )}
@@ -883,6 +834,15 @@ export default function FormationEditor({ formationId }: { formationId?: string 
           )}
         </div>
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   );
 }
